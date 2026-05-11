@@ -59,6 +59,10 @@ uint32_t  textoRecibidoLength = 0;
 
 #if usarAcelerometro
 //////////////////////////////////////// Globales Acelerómetro
+	float buffCircularMedidas[bCMtamano][3];
+	uint32_t pEscrituraBCM = 0;
+	uint32_t pLecturaBCM = 0; // actualizado en "taskMeshtasticMandarTexto"
+	
 	#if (placaSiendoFlasheada == wisblock)
 	LIS3DH myIMU(I2C_MODE, 0x18);
 	#endif
@@ -542,46 +546,27 @@ TaskHandle_t HANDLEtaskAlarmaTagBuzzerYled = NULL;
 	}
 
 	void leerAcelerometro(){
-		char bufferString[128];
-		int bufferStringLength = 0;
-
-
 		#if (placaSiendoFlasheada == wisblock)
-		if(( myIMU.fifoGetStatus() & 0x1F ) == 0) {
-			DPRINTLN("---- No hay datos en la FIFO");  //en myIMU.fifoGetStatus() & 0x1F está cuantos datos hay en la fifo, si es 0 no hay nada nuevo
-			//return;
-		}
-
-		//Quitar la medida vieja
-		myIMU.readFloatAccelX();
-		myIMU.readFloatAccelY();
-		myIMU.readFloatAccelZ();
-
-		int contadorAntiBucleInfinito = 0;
-		while((( myIMU.fifoGetStatus() & 0x20 ) == 0) && (contadorAntiBucleInfinito < 64)){
-			contadorAntiBucleInfinito++;
-			int bufferStringLength = 0;
-			for(int i=0; i<sizeof(bufferString); i++){
-				bufferString[i] = 0;
+			if(( myIMU.fifoGetStatus() & 0x1F ) == 0) {
+				DPRINTLN("---- No hay datos en la FIFO");  //en myIMU.fifoGetStatus() & 0x1F está cuantos datos hay en la fifo, si es 0 no hay nada nuevo
+				//return;
 			}
-			sprintf(bufferString, " X(g) = %.4f,  Y(g) = %.4f,  Z(g) = %.4f", myIMU.readFloatAccelX(), myIMU.readFloatAccelY(), myIMU.readFloatAccelZ());
-			while(bufferString[bufferStringLength] != 0){		bufferStringLength++;		}
-			
-			nuevoDatoLeido(bufferString, bufferStringLength);
-		}
 
+			//Quitar la medida vieja
+			myIMU.readFloatAccelX();
+			myIMU.readFloatAccelY();
+			myIMU.readFloatAccelZ();
 
+			int contadorAntiBucleInfinito = 0;
+			while((( myIMU.fifoGetStatus() & 0x20 ) == 0) && (contadorAntiBucleInfinito < 64)){
+				contadorAntiBucleInfinito++;			
+				nuevoDatoLeido(myIMU.readFloatAccelX(), myIMU.readFloatAccelY(), myIMU.readFloatAccelZ());
+			}
 
-		#elif (placaSiendoFlasheada == wistag)
-
-    for(int i=0; i<sizeof(bufferString); i++){ // Limpiar el buffer
-			bufferString[i] = 0;
-		}
-		sprintf(bufferString, " X(mg) = %.4f,  Y(mg) = %.4f,  Z(mg) = %.4f", accel.getX(), accel.getY(), accel.getZ()); // En miliGs
-			//Ojo que si no han llegado datos, la librería esperará de forma bloqueante hasta que hayan datos
-		while(bufferString[bufferStringLength] != 0){		bufferStringLength++;		}
+		#elif (placaSiendoFlasheada == wistag)		
 		
-		nuevoDatoLeido(bufferString, bufferStringLength);
+			nuevoDatoLeido(accel.getX()*0.001, accel.getY()*0.001, accel.getZ()*0.001); // Convertido de miliGs a Gs
+
 		#endif
 	}
 //////////////////////////////////////// 
@@ -620,19 +605,21 @@ TaskHandle_t HANDLEtaskAlarmaTagBuzzerYled = NULL;
 #endif
 
 
-void nuevoDatoLeido(char* buffer, int bufferLength){
+void nuevoDatoLeido(float accX, float accY, float accZ){
 	
-	DPRINT(buffer);	
+	
+	// Guardar en el buffer 
+	buffCircularMedidas[pEscrituraBCM][0] = accX;
+	buffCircularMedidas[pEscrituraBCM][1] = accY;
+	buffCircularMedidas[pEscrituraBCM][2] = accZ;
+
+	// Si el buffer está lleno, preservar los datos viejos
+	if(((pEscrituraBCM + 1) % bCMtamano) != pLecturaBCM){
+		pEscrituraBCM = (pEscrituraBCM + 1) % bCMtamano;
+	}
 
 	#if usarBluetooth
 		if(g_BleUartConnected) g_BleUart.print(buffer);
-	#endif
-
-	#if mandarMeshtastic
-		for(int i=0; i<bufferLength; i++){
-			bufferMeshtastic[i] = buffer[i];
-		}
-		bufferMeshtasticLength = bufferLength;
 	#endif
 }
 
@@ -733,8 +720,28 @@ void taskIMU(void *pvParameters){
 
 void taskMeshtasticMandarTexto(void *pvParameters){
   TickType_t lastWakeTime = xTaskGetTickCount();
+
+	char bufferString[128];
+	int bufferStringLength = 0;
+
 	while(true){
 		#if usarAcelerometro
+			
+			int bufferStringLength = 0;
+			for(int i=0; i<sizeof(bufferString); i++){
+				bufferString[i] = 0;
+			}
+			sprintf(bufferString, " X(g) = %.4f,  Y(g) = %.4f,  Z(g) = %.4f", buffCircularMedidas[pLecturaBCM][0], buffCircularMedidas[pLecturaBCM][1], buffCircularMedidas[pLecturaBCM][2]);
+			pLecturaBCM = pEscrituraBCM;
+			while(bufferString[bufferStringLength] != 0){		bufferStringLength++;		}
+					
+			DPRINTLN(bufferString);	
+
+			for(int i=0; i<bufferStringLength; i++){
+				bufferMeshtastic[i] = bufferString[i];
+			}
+			bufferMeshtasticLength = bufferStringLength;
+
 			if(bufferMeshtasticLength > 0){
 				radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
 			}
