@@ -168,11 +168,16 @@ uint32_t  textoRecibidoLength = 0;
 //////////////////////////////////////// 
 
 
-TaskHandle_t HANDLEtaskAlarmaTagBuzzerYled = NULL;
+TaskHandle_t 				HANDLEtaskAlarmaTagBuzzerYled = NULL;
+SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición del puntero "pLecturaBCM"
 //////////////////////////////////////// Tasks de FreeRTOS
 	void crearTasks(){
 		#if usarAcelerometro
-			xTaskCreate(taskIMU,"TaskIMU",2048,NULL,5,NULL);
+			imuBufferMutex = xSemaphoreCreateMutex();
+			if (imuBufferMutex == NULL) {
+				Serial.println("Error creando imuBufferMutex");
+			}
+			xTaskCreate(taskIMU,"TaskIMU",2048,NULL,11,NULL);
 		#endif
 
 		#if mandarMeshtastic
@@ -401,7 +406,7 @@ TaskHandle_t HANDLEtaskAlarmaTagBuzzerYled = NULL;
     Serial.flush();
 
     accel.setScale(LIS2DH12_4g);
-    accel.setDataRate(LIS2DH12_ODR_1Hz);
+    accel.setDataRate(freqIMU);
 
 		#endif
 	}
@@ -557,15 +562,44 @@ TaskHandle_t HANDLEtaskAlarmaTagBuzzerYled = NULL;
 			myIMU.readFloatAccelY();
 			myIMU.readFloatAccelZ();
 
-			int contadorAntiBucleInfinito = 0;
-			while((( myIMU.fifoGetStatus() & 0x20 ) == 0) && (contadorAntiBucleInfinito < 64)){
-				contadorAntiBucleInfinito++;			
-				nuevoDatoLeido(myIMU.readFloatAccelX(), myIMU.readFloatAccelY(), myIMU.readFloatAccelZ());
+			if (xSemaphoreTake(imuBufferMutex, portMAX_DELAY) == pdTRUE) {
+
+				int contadorAntiBucleInfinito = 0;
+
+				while(((myIMU.fifoGetStatus() & 0x20) == 0) && (contadorAntiBucleInfinito < 64)) {
+					contadorAntiBucleInfinito++;
+
+					buffCircularMedidas[pEscrituraBCM][0] = myIMU.readFloatAccelX();
+					buffCircularMedidas[pEscrituraBCM][1] = myIMU.readFloatAccelY();
+					buffCircularMedidas[pEscrituraBCM][2] = myIMU.readFloatAccelZ();
+
+					pEscrituraBCM = (pEscrituraBCM + 1) % bCMtamano;
+
+					// Si el buffer está lleno, borrar el dato más antiguo
+					if(pEscrituraBCM == pLecturaBCM) {
+						pLecturaBCM = (pLecturaBCM + 1) % bCMtamano;
+					}
+				}
+
+				xSemaphoreGive(imuBufferMutex);
 			}
 
 		#elif (placaSiendoFlasheada == wistag)		
 		
-			nuevoDatoLeido(accel.getX()*0.001, accel.getY()*0.001, accel.getZ()*0.001); // Convertido de miliGs a Gs
+			if (xSemaphoreTake(imuBufferMutex, portMAX_DELAY) == pdTRUE) {
+
+				buffCircularMedidas[pEscrituraBCM][0] = accel.getX() * 0.001; // Cambiar a miliGs 
+				buffCircularMedidas[pEscrituraBCM][1] = accel.getY() * 0.001;
+				buffCircularMedidas[pEscrituraBCM][2] = accel.getZ() * 0.001;
+
+				pEscrituraBCM = (pEscrituraBCM + 1) % bCMtamano;
+
+				if(((pEscrituraBCM + 1) % bCMtamano) == pLecturaBCM) {
+					pLecturaBCM = (pLecturaBCM + 1) % bCMtamano;
+				}
+
+				xSemaphoreGive(imuBufferMutex);
+			}
 
 		#endif
 	}
@@ -605,29 +639,11 @@ TaskHandle_t HANDLEtaskAlarmaTagBuzzerYled = NULL;
 #endif
 
 
-void nuevoDatoLeido(float accX, float accY, float accZ){
-	
-	
-	// Guardar en el buffer 
-	buffCircularMedidas[pEscrituraBCM][0] = accX;
-	buffCircularMedidas[pEscrituraBCM][1] = accY;
-	buffCircularMedidas[pEscrituraBCM][2] = accZ;
-
-	// Si el buffer está lleno, preservar los datos viejos
-	if(((pEscrituraBCM + 1) % bCMtamano) != pLecturaBCM){
-		pEscrituraBCM = (pEscrituraBCM + 1) % bCMtamano;
-	}
-
-	#if usarBluetooth
-		if(g_BleUartConnected) g_BleUart.print(buffer);
-	#endif
-}
-
 
 
 void setup(){
 	time_t timeout = millis();
-	Serial.begin(115200);
+	Serial.begin(1000000);
 	while (!Serial){
 		if ((millis() - timeout) < 5000){      delay(100);    }
     else														{      break;    			}
@@ -710,9 +726,25 @@ void loop(){
 
 void taskIMU(void *pvParameters){
   TickType_t lastWakeTime = xTaskGetTickCount();
+	int ultimosMilis = millis();
 	while(true){
 		#if usarAcelerometro
 			leerAcelerometro();
+		#endif
+
+		#if printBufferFIFO
+			if (xSemaphoreTake(imuBufferMutex, portMAX_DELAY) == pdTRUE) {
+				while(pEscrituraBCM != pLecturaBCM){
+					char buffer[128];
+					sprintf(buffer, "%.3f; %.3f; %.3f\n", buffCircularMedidas[pLecturaBCM][0], buffCircularMedidas[pLecturaBCM][1], buffCircularMedidas[pLecturaBCM][2]);
+					Serial.print(buffer);
+					pLecturaBCM = (pLecturaBCM + 1) % bCMtamano;
+				}
+				xSemaphoreGive(imuBufferMutex);
+			}
+			//Serial.println(millis() - ultimosMilis);
+			ultimosMilis = millis();
+			Serial.flush();
 		#endif
 		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoAccel));
 	}
@@ -726,13 +758,23 @@ void taskMeshtasticMandarTexto(void *pvParameters){
 
 	while(true){
 		#if usarAcelerometro
-			
+			float accX, accY, accZ;
+
+			if (xSemaphoreTake(imuBufferMutex, portMAX_DELAY) == pdTRUE) { // Con semáforo para evitar que "pLecturaBCM" se pueda editar desde varias funciones
+				accX = buffCircularMedidas[pLecturaBCM][0];
+				accY = buffCircularMedidas[pLecturaBCM][1];
+				accZ = buffCircularMedidas[pLecturaBCM][2];
+
+				pLecturaBCM = pEscrituraBCM;
+
+				xSemaphoreGive(imuBufferMutex);
+			}
+
 			int bufferStringLength = 0;
 			for(int i=0; i<sizeof(bufferString); i++){
 				bufferString[i] = 0;
 			}
-			sprintf(bufferString, " X(g) = %.4f,  Y(g) = %.4f,  Z(g) = %.4f", buffCircularMedidas[pLecturaBCM][0], buffCircularMedidas[pLecturaBCM][1], buffCircularMedidas[pLecturaBCM][2]);
-			pLecturaBCM = pEscrituraBCM;
+			sprintf(bufferString, " X(g) = %.4f,  Y(g) = %.4f,  Z(g) = %.4f", accX, accY, accZ);
 			while(bufferString[bufferStringLength] != 0){		bufferStringLength++;		}
 					
 			DPRINTLN(bufferString);	
