@@ -719,7 +719,7 @@ void setup(){
 	delay(500);
 }
 
-void loop(){
+void loop(){ // Se usa para cambiar el LED (si la placa lo admite) y para alimentar el Watchdog
 	//suspendLoop();
 	#if (placaSiendoFlasheada == wistag)
 		digitalWrite(LED_GREEN, HIGH);
@@ -846,13 +846,12 @@ void taskMeshtasticRecibir(void *pvParameters) {
         }
       }
 			#if (placaSiendoFlasheada == wistag)
-			if (HANDLEtaskAlarmaTagBuzzerYled != NULL) {
-				xTaskNotifyGive(HANDLEtaskAlarmaTagBuzzerYled);
-			}
+			// Se ha recibido un mensaje
+			if (HANDLEtaskAlarmaTagBuzzerYled != NULL) {				xTaskNotifyGive(HANDLEtaskAlarmaTagBuzzerYled);			}
 			#endif
     }
 
-    vTaskDelay(pdMS_TO_TICKS(20));
+    vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
 

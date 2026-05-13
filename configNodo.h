@@ -72,9 +72,15 @@
 
 ////////////////////////////////////////Identificacion del nodo en Meshtastic
 
-  constexpr uint32_t  nodeNum   = 0x01020301;
-  constexpr char*     longName  = "WisMesh_wistag_Arduino_2";
-  constexpr char*     shortName = "0301";
+	#if (placaSiendoFlasheada == wisblock)
+    constexpr uint32_t  nodeNum   = 0x01020304;
+    constexpr char*     longName  = "WisMesh_wisblock_Arduino";
+    constexpr char*     shortName = "0304";
+  #else
+    constexpr uint32_t  nodeNum   = 0x01020300;
+    constexpr char*     longName  = "WisMesh_wistag_Arduino";
+    constexpr char*     shortName = "0301";
+  #endif
   constexpr uint8_t   hopLimit  = 3;
   constexpr bool      wantAck   = false;
   constexpr bool      viaMqtt   = false;
@@ -99,7 +105,7 @@
 
 ////////////////////////////////////////Configuración periodos de tareas
 
-  constexpr uint32_t periodoAccel = 10;			//ms de periodicidad. Es bajo por que el IMU va a 1600 Hz, con 10 ms significa que habrá 16 datos en la fifo
+  constexpr uint32_t periodoAccel = 10;			//ms de periodicidad. Es bajo por que el IMU va a bastantes Hz
 
   //La frecuencia de recogida de datos es de 1 Hz
   constexpr uint32_t periodoMensajePosition = 30*1000;		//ms de periodicidad
@@ -113,8 +119,8 @@
   constexpr uint32_t bCMtamano = 8192;    // Debe ser tan grande como para poder guardar 2 segundos de datos a 1600 Hz
 
 			#if (placaSiendoFlasheada == wisblock)
-        constexpr uint32_t freqIMU = 200;	  						//Hz.  Can be: 0,1,10,25,50,100,200,400,1600,5000 Hz
+        constexpr uint32_t freqIMU = 400;	  						//Hz.  Can be: 0,1,10,25,50,100,200,400,1600,5000 Hz
 			#elif (placaSiendoFlasheada == wistag)
-				#define            freqIMU LIS2DH12_ODR_200Hz
+				#define            freqIMU LIS2DH12_ODR_400Hz
           // Can be LIS2DH12_ODR_1Hz, LIS2DH12_ODR_1Hz, LIS2DH12_ODR_10Hz, LIS2DH12_ODR_25Hz, LIS2DH12_ODR_50Hz, LIS2DH12_ODR_100Hz, LIS2DH12_ODR_200Hz, LIS2DH12_ODR_400Hz, LIS2DH12_ODR_1kHz620_LP, LIS2DH12_ODR_5kHz376_LP_1kHz344_NM_HP, 
 			#endif
