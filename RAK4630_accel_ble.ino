@@ -168,7 +168,7 @@ uint32_t  textoRecibidoLength = 0;
 //////////////////////////////////////// 
 
 
-TaskHandle_t 				HANDLEtaskAlarmaTagBuzzerYled = NULL;
+TaskHandle_t 				HANDLEtaskAlarmaTagBuzzerYled = NULL;			// Para saber cuando 
 SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición del puntero "pLecturaBCM"
 //////////////////////////////////////// Tasks de FreeRTOS
 	void crearTasks(){
@@ -190,7 +190,7 @@ SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición
 		#endif
 
 		#if (placaSiendoFlasheada == wistag)
-			xTaskCreate(taskAlarmaTagBuzzerYled,"TaskAlarmaTagBuzzerYled",512,NULL,7,&HANDLEtaskAlarmaTagBuzzerYled); // Puede tener prioridad alta porque hace mmuy pocas cosas y así no se entrecorta el zumbador
+			xTaskCreate(taskAlarmaTagBuzzerYled,"TaskAlarmaTagBuzzerYled",512,NULL,7,&HANDLEtaskAlarmaTagBuzzerYled); // Puede tener prioridad alta porque ocupa poco tiempo de cómputo y así no se entrecorta el zumbador
 		#endif
 
 		xTaskCreate(taskMeshtasticRecibir,"taskMeshtasticRecibir",8192,NULL,6,NULL); // Puede tener mensajes de alarma, alta prioridad
@@ -552,23 +552,22 @@ SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición
 
 	void leerAcelerometro(){
 		#if (placaSiendoFlasheada == wisblock)
-			if(( myIMU.fifoGetStatus() & 0x1F ) == 0) {
+
+			uint8_t fifoStatus = myIMU.fifoGetStatus();
+			uint8_t muestrasFIFO = fifoStatus & 0x1F;
+
+			if(muestrasFIFO == 0) {
 				DPRINTLN("---- No hay datos en la FIFO");  //en myIMU.fifoGetStatus() & 0x1F está cuantos datos hay en la fifo, si es 0 no hay nada nuevo
 				//return;
 			}
 
-			//Quitar la medida vieja
-			myIMU.readFloatAccelX();
-			myIMU.readFloatAccelY();
-			myIMU.readFloatAccelZ();
+			// //Quitar la medida vieja
+			// myIMU.readFloatAccelX();
+			// myIMU.readFloatAccelY();
+			// myIMU.readFloatAccelZ();
 
 			if (xSemaphoreTake(imuBufferMutex, portMAX_DELAY) == pdTRUE) {
-
-				int contadorAntiBucleInfinito = 0;
-
-				while(((myIMU.fifoGetStatus() & 0x20) == 0) && (contadorAntiBucleInfinito < 64)) {
-					contadorAntiBucleInfinito++;
-
+				for (char i = 0; i < muestrasFIFO; i++) {
 					buffCircularMedidas[pEscrituraBCM][0] = myIMU.readFloatAccelX();
 					buffCircularMedidas[pEscrituraBCM][1] = myIMU.readFloatAccelY();
 					buffCircularMedidas[pEscrituraBCM][2] = myIMU.readFloatAccelZ();
@@ -602,6 +601,19 @@ SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición
 			}
 
 		#endif
+	}
+
+	void printBuffer(){
+		if (xSemaphoreTake(imuBufferMutex, portMAX_DELAY) == pdTRUE) {
+			while(pEscrituraBCM != pLecturaBCM){
+				char buffer[128];
+				sprintf(buffer, "%.3f; %.3f; %.3f\n", buffCircularMedidas[pLecturaBCM][0], buffCircularMedidas[pLecturaBCM][1], buffCircularMedidas[pLecturaBCM][2]);
+				Serial.print(buffer);
+				pLecturaBCM = (pLecturaBCM + 1) % bCMtamano;
+			}
+			xSemaphoreGive(imuBufferMutex);
+		}
+		Serial.flush();
 	}
 //////////////////////////////////////// 
 #endif
@@ -701,8 +713,9 @@ void setup(){
 	#endif
 
 	crearTasks();
-
-	radioMesh.mandarNodeID();
+	#if mandarMeshtastic
+		radioMesh.mandarNodeID();
+	#endif
 	delay(500);
 }
 
@@ -726,25 +739,13 @@ void loop(){
 
 void taskIMU(void *pvParameters){
   TickType_t lastWakeTime = xTaskGetTickCount();
-	int ultimosMilis = millis();
 	while(true){
 		#if usarAcelerometro
 			leerAcelerometro();
 		#endif
 
 		#if printBufferFIFO
-			if (xSemaphoreTake(imuBufferMutex, portMAX_DELAY) == pdTRUE) {
-				while(pEscrituraBCM != pLecturaBCM){
-					char buffer[128];
-					sprintf(buffer, "%.3f; %.3f; %.3f\n", buffCircularMedidas[pLecturaBCM][0], buffCircularMedidas[pLecturaBCM][1], buffCircularMedidas[pLecturaBCM][2]);
-					Serial.print(buffer);
-					pLecturaBCM = (pLecturaBCM + 1) % bCMtamano;
-				}
-				xSemaphoreGive(imuBufferMutex);
-			}
-			//Serial.println(millis() - ultimosMilis);
-			ultimosMilis = millis();
-			Serial.flush();
+			printBuffer();
 		#endif
 		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoAccel));
 	}
