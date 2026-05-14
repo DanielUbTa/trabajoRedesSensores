@@ -44,6 +44,9 @@ extern "C" {
 ////////////////////////////////////////////////////////////
 //-------------------Globales generales-------------------//
 ////////////////////////////////////////////////////////////
+	
+#define LED_GREEN 35
+#define LED_BLUE 36
 
 //SemaphoreHandle_t radioMutex = NULL; // Para que la radio no de problemas de que distintas tareas le piden recibir y mandar al mismo tiempo
 
@@ -622,8 +625,6 @@ SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición
 #if (placaSiendoFlasheada == wistag)
 //////////////////////////////////////// Cosas específicas de la Tag
 	#define BUZZER 21
-	#define LED_GREEN 35
-	#define LED_BLUE 36
 	#define BUTTON 9
 
 	volatile bool botonPulsado = false;
@@ -698,16 +699,13 @@ void setup(){
 		setupAcel();
 	#endif
 
+	pinMode(LED_GREEN, OUTPUT);
+	pinMode(LED_BLUE, OUTPUT);
 
 	#if (placaSiendoFlasheada == wistag)
 		//#define BUZZER 21
 		pinMode(BUZZER, OUTPUT);
 		
-		//#define LED_GREEN 35
-		//#define LED_BLUE 36
-		pinMode(LED_GREEN, OUTPUT);
-		pinMode(LED_BLUE, OUTPUT);
-
 		pinMode(BUTTON, INPUT_PULLUP);
 		attachInterrupt(digitalPinToInterrupt(BUTTON), botonHaSidoPulsado, CHANGE);
 	#endif
@@ -719,18 +717,31 @@ void setup(){
 	delay(500);
 }
 
-void loop(){ // Se usa para cambiar el LED (si la placa lo admite) y para alimentar el Watchdog
-	//suspendLoop();
-	#if (placaSiendoFlasheada == wistag)
-		digitalWrite(LED_GREEN, HIGH);
-		delay(300);
-		digitalWrite(LED_GREEN, LOW);
-		delay(700);
-	#else
-		delay(1000);
-	#endif
 
-	feedWatchdog();
+
+bool LEDencendido = false;
+uint32_t ultimosMilis = 0;
+uint32_t milisON = 500, milisPeriodo = 1000;
+
+void loop(){ // Se usa para cambiar el LED (para ver que la placa no haya crasheado) y para alimentar el Watchdog
+	//suspendLoop();
+
+	// máquina de estados simple
+	if(LEDencendido){
+		if(ultimosMilis + milisON <= millis()){
+			ultimosMilis += milisON;
+			LEDencendido = false;
+			digitalWrite(LED_GREEN, LOW);
+		}
+	}else{
+		if(ultimosMilis + milisPeriodo - milisON <= millis()){
+			ultimosMilis += milisPeriodo - milisON;
+			LEDencendido = true;
+			digitalWrite(LED_GREEN, HIGH);
+
+			feedWatchdog();
+		}
+	}	
 }
 
 
@@ -864,26 +875,22 @@ void taskAlarmaTagBuzzerYled(void * pvParameters) {
 		botonPulsado = false;		
 		if(strstr(textoRecibido, "!ALARMA") == NULL){ // Si en la string recivida no dice "!ALARMA"
 			do{
-				//digitalWrite(LED_GREEN, HIGH);
 				#if !calladitoEstaMasGuapo
 					tone(BUZZER, 440);
 				#endif
 				vTaskDelay(pdMS_TO_TICKS(300));
 
-				//digitalWrite(LED_GREEN, LOW);
 				#if !calladitoEstaMasGuapo
 					noTone(BUZZER);
 				#endif
 				vTaskDelay(pdMS_TO_TICKS(50));
 
 				for(int i=0; i<2; i++){
-					//digitalWrite(LED_GREEN, HIGH);
 					#if !calladitoEstaMasGuapo
 						tone(BUZZER, 2000);
 					#endif
 					vTaskDelay(pdMS_TO_TICKS(50));
 
-					//digitalWrite(LED_GREEN, LOW);
 					#if !calladitoEstaMasGuapo
 						noTone(BUZZER);
 					#endif

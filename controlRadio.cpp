@@ -274,8 +274,7 @@ uint32_t ControlRadio::getTxErrorCount() const { return _txErr; }
     -- STATE_RX_PROCESS : Procesar el mensaje que se ha recibido y meterlo en el buffer de mensajes recibidos
         Se revisa que la longitud sea correcta, si no se vuelve a STATE_REARM_RX
         Se mete el mensaje, con su RSSI y SNR, al buffer de mensajes recibidos. Si ha habido un error en la recepción del mensaje se incrementa el correspondiente contador
-        Se finaliza la recepción y se vuelve a STATE_RE
-        ARM_RX
+        Se finaliza la recepción y se vuelve a STATE_REARM_RX
     -- STATE_TX_START : mandar el mensaje del buffer de mensajes a mandar
         Se revisa que haya algún mensaje que mandar, si lo hay se manda
           Si la radio no ha dado problemas se pasa al estado STATE_AWAITING_RADIO, que esperará a que la radio termine de transmitir
