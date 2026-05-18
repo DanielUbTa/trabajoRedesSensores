@@ -7,7 +7,7 @@
   #define wisblock 0
   #define wistag 1
 
-  #define placaSiendoFlasheada wisblock
+  #define placaSiendoFlasheada wistag
 
   #if((placaSiendoFlasheada != wisblock) && (placaSiendoFlasheada != wistag))
     #error Placa siendo flasheada desconocida
@@ -31,21 +31,15 @@
 
 #define usarAcelerometro true 
 			#if usarAcelerometro
-			#if (placaSiendoFlasheada == wisblock)
-				#include "SparkFunLIS3DH.h" //http://librarymanager/All#SparkFun-LIS3DH
-					// Añade 15.6 mA de consumo a pesar de que debería consumir uA. Igual es alguna librería?
-			#endif
 
-			#if (placaSiendoFlasheada == wistag)
-				#include "SparkFun_LIS2DH12.h" //http://librarymanager/All#SparkFun_LIS2DH12
-			#endif
-
-      #define printBufferFIFO false
-            // Printea todo lo que se puede leer del buffer. Dejar apagado si no se está usando porque consume mucho tiempo de consumo
+#define printBufferFIFO false
+            // Printea todo lo que se puede leer del buffer. Dejar apagado si no se está usando porque consume mucho tiempo de consumo. Independiente de "mandarSerial"
 			#endif
 
 #define mandarMeshtastic true
-	    // No cambiar a false
+
+#define mandarTelemetria true
+
 
 #define mandarSerial true
       ////////////////////////////////////////  Serial.print toggleable
@@ -76,10 +70,10 @@
     constexpr uint32_t  nodeNum   = 0x01020304;
     constexpr char*     longName  = "WisMesh_wisblock_Arduino";
     constexpr char*     shortName = "0304";
-  #else
+  #elif (placaSiendoFlasheada == wistag)
     constexpr uint32_t  nodeNum   = 0x01020300;
     constexpr char*     longName  = "WisMesh_wistag_Arduino";
-    constexpr char*     shortName = "0301";
+    constexpr char*     shortName = "0300";
   #endif
   constexpr uint8_t   hopLimit  = 3;
   constexpr bool      wantAck   = false;
@@ -111,6 +105,8 @@
   constexpr uint32_t periodoMensajePosition = 30*1000;		//ms de periodicidad
 
   constexpr uint32_t periodoMensajeMeshtastic  = 30*1000;				//ms de periodicidad
+
+  constexpr uint32_t periodoMensajeTelemetria  = 120*1000;				//ms de periodicidad
 
 ////////////////////////////////////////
 

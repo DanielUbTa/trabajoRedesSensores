@@ -7,6 +7,14 @@
 #include <TimeLib.h>   // Para conversion a tiempo UNIX
 #include <nrf52840.h>  // Para el watchdog
 
+#if (placaSiendoFlasheada == wisblock)
+	#include "SparkFunLIS3DH.h" //http://librarymanager/All#SparkFun-LIS3DH
+#endif
+
+#if (placaSiendoFlasheada == wistag)
+	#include "SparkFun_LIS2DH12.h" //http://librarymanager/All#SparkFun_LIS2DH12
+#endif
+
 #include "controlRadio.h"
 #include "radioMesh.h"
 
@@ -50,7 +58,7 @@ extern "C" {
 
 //SemaphoreHandle_t radioMutex = NULL; // Para que la radio no de problemas de que distintas tareas le piden recibir y mandar al mismo tiempo
 
-constexpr uint32_t periodoWatchdog = 30; // segundos después de los cuáles saltará el Watchdog
+constexpr uint32_t periodoWatchdog = 10; // segundos después de los cuáles saltará el Watchdog
 
 
 // texto para las notificaciones
@@ -85,6 +93,15 @@ uint32_t  textoRecibidoLength = 0;
 	int bufferMeshtasticLength = 0;
 ////////////////////////////////////////
 
+
+//////////////////////////////////////// Cosas calculo de batería y voltage
+	uint32_t vbat_pin = PIN_A0;
+
+	#define VBAT_MV_PER_LSB   (0.73242188F)   // 3.0V ADC range and 12-bit ADC resolution = 3000mV/4096
+	#define VBAT_DIVIDER      (0.5F)          // 150K + 150K voltage divider on VBAT
+	#define VBAT_DIVIDER_COMP (2.0F)          // Compensation factor for the VBAT divider
+	#define REAL_VBAT_MV_PER_LSB (VBAT_DIVIDER_COMP * VBAT_MV_PER_LSB *   0.8386850668)				//Multiplicador obtenido experimentalmente
+////////////////////////////////////////
 
 #if usarBluetooth
 //////////////////////////////////////// Globales Bluetooth
@@ -192,11 +209,11 @@ SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición
 			xTaskCreate(taskLeerGPS,"TaskLeerGPS",2048,NULL,2,NULL);
 		#endif
 
-		#if (placaSiendoFlasheada == wistag)
-			xTaskCreate(taskAlarmaTagBuzzerYled,"TaskAlarmaTagBuzzerYled",512,NULL,7,&HANDLEtaskAlarmaTagBuzzerYled); // Puede tener prioridad alta porque ocupa poco tiempo de cómputo y así no se entrecorta el zumbador
-		#endif
+		xTaskCreate(taskAlarmaTagBuzzerYled,"TaskAlarmaTagBuzzerYled",512,NULL,7,&HANDLEtaskAlarmaTagBuzzerYled); // Puede tener prioridad alta porque ocupa poco tiempo de cómputo y así no se entrecorta el zumbador
 
 		xTaskCreate(taskMeshtasticRecibir,"taskMeshtasticRecibir",8192,NULL,6,NULL); // Puede tener mensajes de alarma, alta prioridad
+
+		xTaskCreate(taskMeshtasticMandarTelemetria,"taskMeshtasticMandarTelemetria",2048,NULL,2,NULL);
 	}
 //////////////////////////////////////// 
 
@@ -222,6 +239,52 @@ SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición
     return true;
   }
 //////////////////////////////////////// 
+
+
+
+//////////////////////////////////////// Calculo de batería y voltage
+	float readVBAT(void) { // Devuelve miliVoltios
+		float raw;
+
+		// Set the analog reference to 3.0V (default = 3.6V)
+		analogReference(AR_INTERNAL_3_0);
+
+		// Set the resolution to 12-bit (0..4095)
+		analogReadResolution(12); // Can be 8, 10, 12 or 14
+
+		// Let the ADC settle
+		delay(1);
+
+		// Get the raw 12-bit, 0..3000mV ADC value
+		raw = analogRead(vbat_pin);
+
+		// Set the ADC back to the default settings
+		analogReference(AR_DEFAULT);
+		analogReadResolution(10);
+
+		// Convert the raw value to compensated mv, taking the resistor-
+		// divider into account (providing the actual LIPO voltage)
+		// ADC range is 0..3000mV and resolution is 12-bit (0..4095)
+		return raw * REAL_VBAT_MV_PER_LSB; // Devuelve miliVoltios
+	}
+
+	uint8_t mvToPercent(float mvolts) {
+		if(mvolts<3300.0)
+			return 0;
+
+		if(mvolts <3600.0) {
+			mvolts -= 3300;
+			return mvolts/30.0;
+		}
+
+		mvolts -= 3600;
+		int percent = 10 + (mvolts * 0.15F );  // thats mvolts /6.66666666
+		if(percent > 101){
+			percent = 101;
+		}
+		return percent;
+	}
+////////////////////////////////////////
 
 
 
@@ -807,7 +870,7 @@ void taskMeshtasticMandarTexto(void *pvParameters){
 void taskMeshtasticMandarGPS(void *pvParameters){
   TickType_t lastWakeTime = xTaskGetTickCount();
 	while(true){
-		#if usarGPS
+		#if (mandarMeshtastic && usarGPS)
 		if(posicionValidaGPS()){					
 			radioMesh.mandarPosicion((float)gps.location.lat(), (float)gps.location.lng(), gps.altitude.meters(), gpsUtcEpochOr0());
 		}else{
@@ -815,6 +878,19 @@ void taskMeshtasticMandarGPS(void *pvParameters){
 		}
 		#endif
 		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoMensajePosition));
+	}
+}
+
+void taskMeshtasticMandarTelemetria(void *pvParameters){
+  TickType_t lastWakeTime = xTaskGetTickCount();
+	while(true){
+		#if (mandarMeshtastic && mandarTelemetria)			
+			float battVoltageMiliVolt = readVBAT();
+			char battPercentage = mvToPercent(battVoltageMiliVolt);
+			radioMesh.mandarTelemetry(battPercentage, battVoltageMiliVolt*0.001,-1.0,-1.0);
+			DPRINTF("Mandado mensaje de telemetria. Bateria: %.4f V, %d%%\n",battVoltageMiliVolt*0.001, battPercentage);
+		#endif
+		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoMensajeTelemetria));
 	}
 }
 
@@ -856,61 +932,78 @@ void taskMeshtasticRecibir(void *pvParameters) {
           textoRecibidoLength = textoLen;
         }
       }
-			#if (placaSiendoFlasheada == wistag)
 			// Se ha recibido un mensaje
 			if (HANDLEtaskAlarmaTagBuzzerYled != NULL) {				xTaskNotifyGive(HANDLEtaskAlarmaTagBuzzerYled);			}
-			#endif
     }
 
     vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
 
-#if (placaSiendoFlasheada == wistag)
 void taskAlarmaTagBuzzerYled(void * pvParameters) {
 	while (true) {
 		ulTaskNotifyTake(pdTRUE, portMAX_DELAY); // Esperar hasta que alguien le solicite
 
 		digitalWrite(LED_BLUE, HIGH);
-		botonPulsado = false;		
+		#if placaSiendoFlasheada == wistag
+			botonPulsado = false;	
+		#endif
+
 		if(strstr(textoRecibido, "!ALARMA") == NULL){ // Si en la string recivida no dice "!ALARMA"
-			do{
-				#if !calladitoEstaMasGuapo
+			#if (!calladitoEstaMasGuapo) && (placaSiendoFlasheada == wistag)
+				
+				do{
 					tone(BUZZER, 440);
-				#endif
-				vTaskDelay(pdMS_TO_TICKS(300));
-
-				#if !calladitoEstaMasGuapo
+					vTaskDelay(pdMS_TO_TICKS(300));
 					noTone(BUZZER);
-				#endif
-				vTaskDelay(pdMS_TO_TICKS(50));
-
-				for(int i=0; i<2; i++){
-					#if !calladitoEstaMasGuapo
+					vTaskDelay(pdMS_TO_TICKS(50));
+					for(int i=0; i<2; i++){
 						tone(BUZZER, 2000);
-					#endif
-					vTaskDelay(pdMS_TO_TICKS(50));
-
-					#if !calladitoEstaMasGuapo
+						vTaskDelay(pdMS_TO_TICKS(50));
 						noTone(BUZZER);
-					#endif
-					vTaskDelay(pdMS_TO_TICKS(50));
-				}
-				vTaskDelay(pdMS_TO_TICKS(500));
-			}while(!botonPulsado);
+						vTaskDelay(pdMS_TO_TICKS(50));
+					}
+					vTaskDelay(pdMS_TO_TICKS(500));
+				}while(!botonPulsado);
+
+				#else
+					for(int i=0; i<12; i++){
+						digitalWrite(LED_BLUE, HIGH);
+						vTaskDelay(pdMS_TO_TICKS(100));
+						digitalWrite(LED_BLUE, LOW);
+						vTaskDelay(pdMS_TO_TICKS(100));
+					}
+				#endif
+
 		}else{
-			do{
-				tone(BUZZER, 4000);
-				vTaskDelay(pdMS_TO_TICKS(1000));
-				tone(BUZZER, 3000);
-				vTaskDelay(pdMS_TO_TICKS(1000));
-			}while(!botonPulsado);
-			noTone(BUZZER);
+
+			#if (!calladitoEstaMasGuapo) && (placaSiendoFlasheada == wistag)
+
+				do{
+					tone(BUZZER, 4000);
+					vTaskDelay(pdMS_TO_TICKS(1000));
+					tone(BUZZER, 3000);
+					vTaskDelay(pdMS_TO_TICKS(1000));
+				}while(!botonPulsado);
+					noTone(BUZZER);
+				
+			#else 
+
+				for(int i=0; i<4; i++){
+					digitalWrite(LED_BLUE, HIGH);
+					vTaskDelay(pdMS_TO_TICKS(1000));
+					digitalWrite(LED_BLUE, LOW);
+					vTaskDelay(pdMS_TO_TICKS(1000));
+				}
+
+			#endif
 		}
-		botonPulsado = false;
+
+		#if placaSiendoFlasheada == wistag
+			botonPulsado = false;	
+		#endif
 		digitalWrite(LED_BLUE, LOW);
 	}
 }
-#endif
 
 ////////////////////////////////////////////////////////////
