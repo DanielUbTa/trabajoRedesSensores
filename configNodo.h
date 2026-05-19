@@ -56,8 +56,8 @@
 
 #if (placaSiendoFlasheada == wistag)
 
-  #define calladitoEstaMasGuapo false
-        // true para que no pite la wistag
+  #define calladitoEstaMasGuapo true
+        // true para que no pite la wistag cuando le llegue un mensaje normal. Siempre pita si le llega un mensaje de emergencia
 
 #endif
 
@@ -71,9 +71,9 @@
     constexpr char*     longName  = "WisMesh_wisblock_Arduino";
     constexpr char*     shortName = "0304";
   #elif (placaSiendoFlasheada == wistag)
-    constexpr uint32_t  nodeNum   = 0x01020300;
-    constexpr char*     longName  = "WisMesh_wistag_Arduino";
-    constexpr char*     shortName = "0300";
+    constexpr uint32_t  nodeNum   = 0x01020301;
+    constexpr char*     longName  = "WisMesh_wistag_Arduino_1";
+    constexpr char*     shortName = "0301";
   #endif
   constexpr uint8_t   hopLimit  = 3;
   constexpr bool      wantAck   = false;

@@ -977,7 +977,7 @@ void taskAlarmaTagBuzzerYled(void * pvParameters) {
 
 		}else{
 
-			#if (!calladitoEstaMasGuapo) && (placaSiendoFlasheada == wistag)
+			#if placaSiendoFlasheada == wistag
 
 				do{
 					tone(BUZZER, 4000);
