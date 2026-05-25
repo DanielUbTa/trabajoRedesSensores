@@ -23,7 +23,7 @@
 			#endif
 
 
-#define usarGPS true
+#define usarGPS false
       // Añade 36 mA de consumo
       #define debugGPS false      
 
@@ -99,14 +99,14 @@
 
 ////////////////////////////////////////Configuración periodos de tareas
 
-  constexpr uint32_t periodoAccel = 10;			//ms de periodicidad. Es bajo por que el IMU va a bastantes Hz
+  constexpr uint32_t periodoAccel = 40;			//ms de periodicidad. Es bajo por que el IMU va a bastantes Hz
 
   //La frecuencia de recogida de datos es de 1 Hz
   constexpr uint32_t periodoMensajePosition = 30*1000;		//ms de periodicidad
 
-  constexpr uint32_t periodoMensajeMeshtastic  = 30*1000;				//ms de periodicidad
+  constexpr uint32_t periodoMensajeMeshtastic  = 5*1000;				//ms de periodicidad
 
-  constexpr uint32_t periodoMensajeTelemetria  = 120*1000;				//ms de periodicidad
+  constexpr uint32_t periodoMensajeTelemetriaYnodeID  = 240*1000;				//ms de periodicidad
 
 ////////////////////////////////////////
 
@@ -120,3 +120,7 @@
 				#define            freqIMU LIS2DH12_ODR_400Hz
           // Can be LIS2DH12_ODR_1Hz, LIS2DH12_ODR_1Hz, LIS2DH12_ODR_10Hz, LIS2DH12_ODR_25Hz, LIS2DH12_ODR_50Hz, LIS2DH12_ODR_100Hz, LIS2DH12_ODR_200Hz, LIS2DH12_ODR_400Hz, LIS2DH12_ODR_1kHz620_LP, LIS2DH12_ODR_5kHz376_LP_1kHz344_NM_HP, 
 			#endif
+  
+	constexpr float UMBRAL_ESTADO_RED_NEURONAL = 0.80f;
+
+  constexpr uint32_t milisMinEstadoRedNeuronal = 60*1000;

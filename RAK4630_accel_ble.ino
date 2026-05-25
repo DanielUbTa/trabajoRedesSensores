@@ -17,6 +17,7 @@
 
 #include "controlRadio.h"
 #include "radioMesh.h"
+#include <Trabajo_inferencing.h>
 
 /*
 extern "C" {
@@ -82,7 +83,26 @@ uint32_t  textoRecibidoLength = 0;
 	SPARKFUN_LIS2DH12 accel;
 	#endif
 //////////////////////////////////////// 
+
+
+
+//////////////////////////////////////// Cosas procesado Red neuronal
+	float entradaRedNeuronal[EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE]; // 400*2*3
+	uint32_t pEntradaRed = 0;
+
+	enum EstadoMovimiento {
+		ESTADO_CAMINANDO,
+		ESTADO_ESTACIONARIO,
+		ESTADO_PICANDO,
+		ESTADO_CAIDA,
+		ESTADO_NO_RECONOCIDO
+	};
+
+	volatile EstadoMovimiento estadoMovimientoGlobal = ESTADO_NO_RECONOCIDO;
+////////////////////////////////////////
 #endif
+
+
 
 //////////////////////////////////////// Cosas radio y Meshtastic
 	SX1262 radio = new Module(42, 47, 38, 46, SPI); // Estos pines son iguales para ambas placas
@@ -94,6 +114,7 @@ uint32_t  textoRecibidoLength = 0;
 ////////////////////////////////////////
 
 
+
 //////////////////////////////////////// Cosas calculo de batería y voltage
 	uint32_t vbat_pin = PIN_A0;
 
@@ -102,6 +123,8 @@ uint32_t  textoRecibidoLength = 0;
 	#define VBAT_DIVIDER_COMP (2.0F)          // Compensation factor for the VBAT divider
 	#define REAL_VBAT_MV_PER_LSB (VBAT_DIVIDER_COMP * VBAT_MV_PER_LSB *   0.8386850668)				//Multiplicador obtenido experimentalmente
 ////////////////////////////////////////
+
+
 
 #if usarBluetooth
 //////////////////////////////////////// Globales Bluetooth
@@ -197,7 +220,9 @@ SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición
 			if (imuBufferMutex == NULL) {
 				Serial.println("Error creando imuBufferMutex");
 			}
-			xTaskCreate(taskIMU,"TaskIMU",2048,NULL,11,NULL);
+			xTaskCreate(taskIMU,"TaskIMU",512,NULL,11,NULL);
+
+			xTaskCreate(taskProcesado,"taskProcesado",2048,NULL,1,NULL);			
 		#endif
 
 		#if mandarMeshtastic
@@ -206,14 +231,15 @@ SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición
 
 		#if (mandarMeshtastic && usarGPS)
 			xTaskCreate(taskMeshtasticMandarGPS,"TaskMensajeGPS",2048,NULL,3,NULL);
+
 			xTaskCreate(taskLeerGPS,"TaskLeerGPS",2048,NULL,2,NULL);
 		#endif
 
 		xTaskCreate(taskAlarmaTagBuzzerYled,"TaskAlarmaTagBuzzerYled",512,NULL,7,&HANDLEtaskAlarmaTagBuzzerYled); // Puede tener prioridad alta porque ocupa poco tiempo de cómputo y así no se entrecorta el zumbador
 
-		xTaskCreate(taskMeshtasticRecibir,"taskMeshtasticRecibir",8192,NULL,6,NULL); // Puede tener mensajes de alarma, alta prioridad
+		xTaskCreate(taskMeshtasticRecibir,"taskMeshtasticRecibir",2048,NULL,6,NULL); // Puede tener mensajes de alarma, alta prioridad
 
-		xTaskCreate(taskMeshtasticMandarTelemetria,"taskMeshtasticMandarTelemetria",2048,NULL,2,NULL);
+		xTaskCreate(taskMeshtasticMandarTelemetriaYnodeID,"taskMeshtasticMandarTelemetriaYnodeID",2048,NULL,2,NULL);
 	}
 //////////////////////////////////////// 
 
@@ -681,7 +707,66 @@ SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición
 		}
 		Serial.flush();
 	}
-//////////////////////////////////////// 
+////////////////////////////////////////
+
+//////////////////////////////////////// Cosas procesado Red neuronal
+	void prepararArrayRed() {
+		uint32_t inicio = (pEscrituraBCM + bCMtamano - EI_CLASSIFIER_RAW_SAMPLE_COUNT) % bCMtamano;
+
+		for (uint32_t j = 0; j < EI_CLASSIFIER_RAW_SAMPLE_COUNT; j++) {
+			uint32_t idxBuffer = (inicio + j) % bCMtamano;
+			uint32_t idxRed = j * EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME;
+
+			entradaRedNeuronal[idxRed + 0] = buffCircularMedidas[idxBuffer][0]; // Acc X
+			entradaRedNeuronal[idxRed + 1] = buffCircularMedidas[idxBuffer][1]; // Acc Y
+			entradaRedNeuronal[idxRed + 2] = buffCircularMedidas[idxBuffer][2]; // Acc Z
+		}
+	}
+
+	static int getSignalDataEntradaRed(size_t offset, size_t length, float *out_ptr) {
+		if ((offset + length) > EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE) {
+			return EIDSP_OUT_OF_MEM;
+		}
+
+		memcpy(out_ptr, entradaRedNeuronal + offset, length * sizeof(float));
+		return EIDSP_OK;
+	}
+
+	EstadoMovimiento obtenerEstadoDesdeResultado(const ei_impulse_result_t &result) {
+		float mejorValor = 0.0f;
+		EstadoMovimiento mejorEstado = ESTADO_NO_RECONOCIDO;
+
+		for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
+			const char *label = result.classification[i].label;
+			float value = result.classification[i].value;
+
+			if (value > mejorValor) {
+				if (strcmp(label, "Caminando") == 0) {
+					mejorEstado = ESTADO_CAMINANDO;
+					mejorValor = value;
+				}
+				else if (strcmp(label, "Estacionario") == 0) {
+					mejorEstado = ESTADO_ESTACIONARIO;
+					mejorValor = value;
+				}
+				else if (strcmp(label, "Picando") == 0) {
+					mejorEstado = ESTADO_PICANDO;
+					mejorValor = value;
+				}
+				else if (strcmp(label, "Caidas") == 0 || strcmp(label, "Caida") == 0) {
+					mejorEstado = ESTADO_CAIDA;
+					mejorValor = value;
+				}
+			}
+		}
+
+		if (mejorValor < UMBRAL_ESTADO_RED_NEURONAL) {
+			return ESTADO_NO_RECONOCIDO;
+		}
+
+		return mejorEstado;
+	}
+////////////////////////////////////////
 #endif
 
 
@@ -821,49 +906,272 @@ void taskIMU(void *pvParameters){
 		#if printBufferFIFO
 			printBuffer();
 		#endif
-		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoAccel));
+
+		#if (placaSiendoFlasheada == wistag)
+			vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(5)); // Para llegar a los 2.5 ms
+		#else
+			vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoAccel));
+		#endif
 	}
 }
 
-void taskMeshtasticMandarTexto(void *pvParameters){
-  TickType_t lastWakeTime = xTaskGetTickCount();
+void taskProcesado(void * pvParameters) {
+	TickType_t lastWakeTime = xTaskGetTickCount();
 
-	char bufferString[128];
-	int bufferStringLength = 0;
+	delay(1000);
 
-	while(true){
+	while (true) {
 		#if usarAcelerometro
-			float accX, accY, accZ;
 
-			if (xSemaphoreTake(imuBufferMutex, portMAX_DELAY) == pdTRUE) { // Con semáforo para evitar que "pLecturaBCM" se pueda editar desde varias funciones
-				accX = buffCircularMedidas[pLecturaBCM][0];
-				accY = buffCircularMedidas[pLecturaBCM][1];
-				accZ = buffCircularMedidas[pLecturaBCM][2];
-
-				pLecturaBCM = pEscrituraBCM;
-
+			if (xSemaphoreTake(imuBufferMutex, portMAX_DELAY) == pdTRUE) {
+				prepararArrayRed();
 				xSemaphoreGive(imuBufferMutex);
 			}
-
-			int bufferStringLength = 0;
-			for(int i=0; i<sizeof(bufferString); i++){
-				bufferString[i] = 0;
+			else {
+				estadoMovimientoGlobal = ESTADO_NO_RECONOCIDO;
+				vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(500));
+				continue;
 			}
-			sprintf(bufferString, " X(g) = %.4f,  Y(g) = %.4f,  Z(g) = %.4f", accX, accY, accZ);
-			while(bufferString[bufferStringLength] != 0){		bufferStringLength++;		}
-					
-			DPRINTLN(bufferString);	
 
-			for(int i=0; i<bufferStringLength; i++){
-				bufferMeshtastic[i] = bufferString[i];
-			}
-			bufferMeshtasticLength = bufferStringLength;
+			signal_t signal;
+			signal.total_length = EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE;
+			signal.get_data = &getSignalDataEntradaRed;
 
-			if(bufferMeshtasticLength > 0){
-				radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
+			ei_impulse_result_t result = { 0 };
+
+			EI_IMPULSE_ERROR err = run_classifier(&signal, &result, false);
+
+			if (err == EI_IMPULSE_OK) {
+				estadoMovimientoGlobal = obtenerEstadoDesdeResultado(result);
+
+				#if mandarSerial
+					Serial.print("Estado red neuronal: ");
+
+					switch (estadoMovimientoGlobal) {
+						case ESTADO_CAMINANDO:
+							Serial.println("caminando");
+							break;
+
+						case ESTADO_ESTACIONARIO:
+							Serial.println("estacionario");
+							break;
+
+						case ESTADO_PICANDO:
+							Serial.println("picando");
+							break;
+
+						case ESTADO_CAIDA:
+							Serial.println("caida");
+							break;
+
+						case ESTADO_NO_RECONOCIDO:
+						default:
+							Serial.println("no reconocido");
+							break;
+					}
+
+					for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
+						Serial.print(result.classification[i].label);
+						Serial.print(": ");
+						Serial.println(result.classification[i].value, 4);
+					}
+				#endif
 			}
+			else {
+				estadoMovimientoGlobal = ESTADO_NO_RECONOCIDO;
+
+				#if mandarSerial
+					Serial.print("Error ejecutando run_classifier: ");
+					Serial.println((int)err);
+				#endif
+			}
+
 		#endif
-		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoMensajeMeshtastic));
+
+		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(500));
+	}
+}
+
+void taskMeshtasticMandarTexto(void *pvParameters) {
+	TickType_t lastWakeTime = xTaskGetTickCount();
+
+	#if usarAcelerometro
+		constexpr uint8_t N_ESTADOS_FILTRO = 7;
+		constexpr uint8_t MIN_ESTADOS_CAMBIO = 5;
+		constexpr uint8_t MIN_CAIDAS_CAMBIO = 2;
+
+		EstadoMovimiento historicoEstados[N_ESTADOS_FILTRO];
+		uint8_t indiceHistoricoEstados = 0;
+		uint8_t estadosGuardados = 0;
+
+		EstadoMovimiento ultimoEstadoEnviado = ESTADO_NO_RECONOCIDO;
+		EstadoMovimiento estadoFiltradoActual = ESTADO_NO_RECONOCIDO;
+
+		bool primerEstadoEnviado = true;
+		uint32_t ultimoMensajeMandadoMs = 0;
+		bool yaSeHaMandadoMensaje = false;
+	#endif
+
+	char bufferString[128];
+
+	while (true) {
+		#if usarAcelerometro
+
+			EstadoMovimiento estadoLeido = estadoMovimientoGlobal;
+
+			historicoEstados[indiceHistoricoEstados] = estadoLeido;
+			indiceHistoricoEstados = (indiceHistoricoEstados + 1) % N_ESTADOS_FILTRO;
+
+			if (estadosGuardados < N_ESTADOS_FILTRO) {
+				estadosGuardados++;
+			}
+
+			uint8_t contadorCaminando = 0;
+			uint8_t contadorEstacionario = 0;
+			uint8_t contadorPicando = 0;
+			uint8_t contadorCaida = 0;
+			uint8_t contadorNoReconocido = 0;
+
+			for (uint8_t i = 0; i < estadosGuardados; i++) {
+				switch (historicoEstados[i]) {
+					case ESTADO_CAMINANDO:
+						contadorCaminando++;
+						break;
+
+					case ESTADO_ESTACIONARIO:
+						contadorEstacionario++;
+						break;
+
+					case ESTADO_PICANDO:
+						contadorPicando++;
+						break;
+
+					case ESTADO_CAIDA:
+						contadorCaida++;
+						break;
+
+					case ESTADO_NO_RECONOCIDO:
+					default:
+						contadorNoReconocido++;
+						break;
+				}
+			}
+
+			EstadoMovimiento nuevoEstadoFiltrado = estadoFiltradoActual;
+			bool hayNuevoEstadoFiltrado = false;
+
+			if (contadorCaida >= MIN_CAIDAS_CAMBIO) {
+				nuevoEstadoFiltrado = ESTADO_CAIDA;
+				hayNuevoEstadoFiltrado = true;
+			}
+			else if (contadorCaminando >= MIN_ESTADOS_CAMBIO) {
+				nuevoEstadoFiltrado = ESTADO_CAMINANDO;
+				hayNuevoEstadoFiltrado = true;
+			}
+			else if (contadorEstacionario >= MIN_ESTADOS_CAMBIO) {
+				nuevoEstadoFiltrado = ESTADO_ESTACIONARIO;
+				hayNuevoEstadoFiltrado = true;
+			}
+			else if (contadorPicando >= MIN_ESTADOS_CAMBIO) {
+				nuevoEstadoFiltrado = ESTADO_PICANDO;
+				hayNuevoEstadoFiltrado = true;
+			}
+			else if (contadorNoReconocido >= MIN_ESTADOS_CAMBIO) {
+				nuevoEstadoFiltrado = ESTADO_NO_RECONOCIDO;
+				hayNuevoEstadoFiltrado = true;
+			}
+
+			if (hayNuevoEstadoFiltrado) {
+				estadoFiltradoActual = nuevoEstadoFiltrado;
+			}
+
+			bool estadoHaCambiado = primerEstadoEnviado || (estadoFiltradoActual != ultimoEstadoEnviado);
+
+			if (estadoHaCambiado) {
+				const char *estadoTexto = "no reconocido";
+
+				switch (estadoFiltradoActual) {
+					case ESTADO_CAMINANDO:
+						estadoTexto = "caminando";
+						break;
+
+					case ESTADO_ESTACIONARIO:
+						estadoTexto = "estacionario";
+						break;
+
+					case ESTADO_PICANDO:
+						estadoTexto = "picando";
+						break;
+
+					case ESTADO_CAIDA:
+						estadoTexto = "caida";
+						break;
+
+					case ESTADO_NO_RECONOCIDO:
+					default:
+						estadoTexto = "no reconocido";
+						break;
+				}
+
+				bool mandarMensaje = false;
+
+				if (estadoFiltradoActual == ESTADO_CAIDA) {
+					mandarMensaje = true;
+				}
+				else {
+					if (!yaSeHaMandadoMensaje || ((uint32_t)(millis() - ultimoMensajeMandadoMs) >= periodoMensajeMeshtastic)) {
+						mandarMensaje = true;
+					}
+				}
+
+				if (mandarMensaje) {
+					memset(bufferString, 0, sizeof(bufferString));
+
+					if (estadoFiltradoActual == ESTADO_CAIDA) {
+						snprintf(
+							bufferString,
+							sizeof(bufferString),
+							"!ALARMA caída detectada de %s",
+							longName
+						);
+					}
+					else {
+						snprintf(
+							bufferString,
+							sizeof(bufferString),
+							"Estado de %s: %s",
+							longName,
+							estadoTexto
+						);
+					}
+
+					bufferString[sizeof(bufferString) - 1] = '\0';
+
+					bufferMeshtasticLength = strlen(bufferString);
+
+					if (bufferMeshtasticLength >= sizeof(bufferMeshtastic)) {
+						bufferMeshtasticLength = sizeof(bufferMeshtastic) - 1;
+					}
+
+					memcpy(bufferMeshtastic, bufferString, bufferMeshtasticLength);
+					bufferMeshtastic[bufferMeshtasticLength] = '\0';
+
+					DPRINTLN(bufferMeshtastic);
+
+					if (bufferMeshtasticLength > 0) {
+						radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
+
+						ultimoEstadoEnviado = estadoFiltradoActual;
+						primerEstadoEnviado = false;
+						ultimoMensajeMandadoMs = millis();
+						yaSeHaMandadoMensaje = true;
+					}
+				}
+			}
+
+		#endif
+
+		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(250));
 	}
 }
 
@@ -881,16 +1189,20 @@ void taskMeshtasticMandarGPS(void *pvParameters){
 	}
 }
 
-void taskMeshtasticMandarTelemetria(void *pvParameters){
+void taskMeshtasticMandarTelemetriaYnodeID(void *pvParameters){
   TickType_t lastWakeTime = xTaskGetTickCount();
 	while(true){
+		#if mandarMeshtastic
+			radioMesh.mandarNodeID();
+			vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoMensajeTelemetriaYnodeID/2));
+		#endif
 		#if (mandarMeshtastic && mandarTelemetria)			
 			float battVoltageMiliVolt = readVBAT();
 			char battPercentage = mvToPercent(battVoltageMiliVolt);
 			radioMesh.mandarTelemetry(battPercentage, battVoltageMiliVolt*0.001,-1.0,-1.0);
 			DPRINTF("Mandado mensaje de telemetria. Bateria: %.4f V, %d%%\n",battVoltageMiliVolt*0.001, battPercentage);
 		#endif
-		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoMensajeTelemetria));
+		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoMensajeTelemetriaYnodeID/2));
 	}
 }
 
@@ -912,11 +1224,7 @@ void taskMeshtasticRecibir(void *pvParameters) {
         char texto[256];
         uint32_t textoLen = 0;
 
-        if (radioMesh.decodificarSiEsTexto(msg.data + 16,
-                                           msg.len - 16,
-                                           texto,
-                                           sizeof(texto),
-                                           &textoLen)) {
+        if (radioMesh.decodificarSiEsTexto(msg.data + 16, msg.len - 16, texto, sizeof(texto), &textoLen)) {
           DPRINT("Recibido: ");
           DPRINTLN(texto);
 
