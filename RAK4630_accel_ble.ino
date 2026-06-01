@@ -59,7 +59,7 @@ extern "C" {
 
 //SemaphoreHandle_t radioMutex = NULL; // Para que la radio no de problemas de que distintas tareas le piden recibir y mandar al mismo tiempo
 
-constexpr uint32_t periodoWatchdog = 10; // segundos después de los cuáles saltará el Watchdog
+constexpr uint32_t periodoWatchdog = 20; // segundos después de los cuáles saltará el Watchdog
 
 
 // texto para las notificaciones
@@ -211,7 +211,7 @@ uint32_t  textoRecibidoLength = 0;
 //////////////////////////////////////// 
 
 
-TaskHandle_t 				HANDLEtaskAlarmaTagBuzzerYled = NULL;			// Para saber cuando 
+TaskHandle_t 				HANDLEtaskAlarmaTagBuzzerYled = NULL;
 SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición del puntero "pLecturaBCM"
 //////////////////////////////////////// Tasks de FreeRTOS
 	void crearTasks(){
@@ -701,6 +701,11 @@ SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición
 				char buffer[128];
 				sprintf(buffer, "%.3f; %.3f; %.3f\n", buffCircularMedidas[pLecturaBCM][0], buffCircularMedidas[pLecturaBCM][1], buffCircularMedidas[pLecturaBCM][2]);
 				Serial.print(buffer);
+				#if usarBluetooth
+					if(g_BleUartConnected){
+						g_BleUart.print(buffer);
+					}
+				#endif
 				pLecturaBCM = (pLecturaBCM + 1) % bCMtamano;
 			}
 			xSemaphoreGive(imuBufferMutex);
@@ -869,7 +874,7 @@ void setup(){
 
 bool LEDencendido = false;
 uint32_t ultimosMilis = 0;
-uint32_t milisON = 500, milisPeriodo = 1000;
+uint32_t milisON = 500, milisPeriodo = 5000; // 10% duty
 
 void loop(){ // Se usa para cambiar el LED (para ver que la placa no haya crasheado) y para alimentar el Watchdog
 	//suspendLoop();
@@ -907,11 +912,7 @@ void taskIMU(void *pvParameters){
 			printBuffer();
 		#endif
 
-		#if (placaSiendoFlasheada == wistag)
-			vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(5)); // Para llegar a los 2.5 ms
-		#else
-			vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoAccel));
-		#endif
+		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoAccel));
 	}
 }
 
@@ -1158,6 +1159,12 @@ void taskMeshtasticMandarTexto(void *pvParameters) {
 
 					DPRINTLN(bufferMeshtastic);
 
+					/*#if usarBluetooth
+						if(g_BleUartConnected){
+							g_BleUart.println(bufferMeshtastic);
+						}
+					#endif*/
+
 					if (bufferMeshtasticLength > 0) {
 						radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
 
@@ -1226,15 +1233,16 @@ void taskMeshtasticRecibir(void *pvParameters) {
 
         if (radioMesh.decodificarSiEsTexto(msg.data + 16, msg.len - 16, texto, sizeof(texto), &textoLen)) {
           DPRINT("Recibido: ");
-          DPRINTLN(texto);
+          DPRINT(texto);
 
-					#if usarBluetooth
+					/*#if usarBluetooth
 						if(g_BleUartConnected){
-							DPRINTLN("Mandando por Bluetooth");
-							g_BleUart.print("Recibido: ");
+							DPRINT("		Mandando por Bluetooth");
 							g_BleUart.println(texto);
 						}
-					#endif
+					#endif*/
+
+					DPRINTLN();
 
           memcpy(textoRecibido, texto, textoLen + 1);
           textoRecibidoLength = textoLen;
@@ -1258,7 +1266,7 @@ void taskAlarmaTagBuzzerYled(void * pvParameters) {
 		#endif
 
 		if(strstr(textoRecibido, "!ALARMA") == NULL){ // Si en la string recivida no dice "!ALARMA"
-			#if (!calladitoEstaMasGuapo) && (placaSiendoFlasheada == wistag)
+			#if false //(!calladitoEstaMasGuapo) && (placaSiendoFlasheada == wistag)
 				
 				do{
 					tone(BUZZER, 440);
@@ -1285,7 +1293,7 @@ void taskAlarmaTagBuzzerYled(void * pvParameters) {
 
 		}else{
 
-			#if placaSiendoFlasheada == wistag
+			#if (!calladitoEstaMasGuapo) && (placaSiendoFlasheada == wistag)
 
 				do{
 					tone(BUZZER, 4000);
