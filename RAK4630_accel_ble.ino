@@ -1120,7 +1120,7 @@ void taskMeshtasticMandarTexto(void *pvParameters) {
 					mandarMensaje = true;
 				}
 				else {
-					if (!yaSeHaMandadoMensaje || ((uint32_t)(millis() - ultimoMensajeMandadoMs) >= periodoMensajeMeshtastic)) {
+					if (!yaSeHaMandadoMensaje || ((uint32_t)(millis() - ultimoMensajeMandadoMs) >= tiempoMinimoEntreMensajesMeshtastic)) {
 						mandarMensaje = true;
 					}
 				}

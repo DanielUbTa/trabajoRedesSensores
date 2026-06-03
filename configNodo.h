@@ -17,7 +17,7 @@
 
 
 
-#define usarBluetooth true
+#define usarBluetooth false
 			#if usarBluetooth	
 			#include <bluefruit.h>
 			#endif
@@ -32,7 +32,7 @@
 #define usarAcelerometro true 
 			#if usarAcelerometro
 
-#define printBufferFIFO true
+#define printBufferFIFO false
             // Printea todo lo que se puede leer del buffer. Dejar apagado si no se está usando porque consume mucho tiempo de consumo. Independiente de "mandarSerial"
             // Si BLuetooth está encendido también se imprimirá por allí
 			#endif
@@ -42,7 +42,7 @@
 #define mandarTelemetria true
 
 
-#define mandarSerial true
+#define mandarSerial false
       ////////////////////////////////////////  Serial.print toggleable
         #if mandarSerial
           #define DPRINT(...) Serial.print(__VA_ARGS__)
@@ -58,7 +58,7 @@
 #if (placaSiendoFlasheada == wistag)
 
   #define calladitoEstaMasGuapo true
-        // true para que no pite la wistag cuando le llegue un mensaje normal. Siempre pita si le llega un mensaje de emergencia
+        // true para que no pite la wistag
 
 #endif
 
@@ -76,7 +76,7 @@
     constexpr char*     longName  = "Wistag_Casco_Minero";
     constexpr char*     shortName = "0300";
   #endif
-  constexpr uint8_t   hopLimit  = 3;
+  constexpr uint8_t   hopLimit  = 7;
   constexpr bool      wantAck   = false;
   constexpr bool      viaMqtt   = false;
 
@@ -102,11 +102,11 @@
 
   constexpr uint32_t periodoAccel = 20;			//ms de periodicidad
 
-  constexpr uint32_t periodoMensajePosition = 30*1000;		//ms de periodicidad
+  constexpr uint32_t periodoMensajePosition = 5*60*1000;		//ms de periodicidad
 
-  constexpr uint32_t periodoMensajeMeshtastic  = 5*1000;				//ms de periodicidad
+  constexpr uint32_t tiempoMinimoEntreMensajesMeshtastic  = 30*1000;				//ms de periodicidad
 
-  constexpr uint32_t periodoMensajeTelemetriaYnodeID  = 240*1000;				//ms de periodicidad
+  constexpr uint32_t periodoMensajeTelemetriaYnodeID  = 30*60*1000;				//ms de periodicidad
 
 ////////////////////////////////////////
 
