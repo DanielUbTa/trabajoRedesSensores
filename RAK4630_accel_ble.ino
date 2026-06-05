@@ -4,8 +4,12 @@
 
 #include <RadioLib.h>
 #include <TinyGPSPlus.h>
-#include <TimeLib.h>   // Para conversion a tiempo UNIX
-#include <nrf52840.h>  // Para el watchdog
+#include <TimeLib.h>   	// Para conversion a tiempo UNIX
+#include <nrf52840.h>  	// Para el watchdog
+
+#include <nrf.h>				// Para el control de consumo
+#include <nrf_gpio.h>
+
 
 #if (placaSiendoFlasheada == wisblock)
 	#include "SparkFunLIS3DH.h" //http://librarymanager/All#SparkFun-LIS3DH
@@ -44,6 +48,11 @@ extern "C" {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+// TODO en caso de emergencia, interesaría pasar a un modo de super bajo consumo en el que el minero pudiese pulsar el botón periodicamente para saber si sigue bien
 
 
 
@@ -169,6 +178,43 @@ uint32_t  textoRecibidoLength = 0;
 
 
 
+#if (placaSiendoFlasheada == wistag)
+//////////////////////////////////////// Cosas específicas de la Tag. Incluye interrupciones por botón y modo de sleep en cuant se manda un mensaje de emergencia
+	#define BUZZER 21
+	#define BUTTON 9
+
+	volatile bool botonPulsado = false;
+	volatile uint32_t cuandoFuePulsado = 0xFFFFFFFF; // Tiempo máximo 
+
+	constexpr const char* mensajeAlarma = "!ALARMA de ";
+	char mensajeAlarmaConNombre[64];
+
+	void botonHaSidoPulsado(void){
+		if(digitalRead(BUTTON) == LOW){
+			botonPulsado = true;
+			cuandoFuePulsado = millis();
+			//Serial.printf("Boton pulsado\n");
+		}else{
+			if((unsigned)millis() - cuandoFuePulsado >= 3000){	// Se ha pulsado el botón durante más de 3 segundos, eso significa emergencia
+				size_t len1 = strlen(mensajeAlarma);
+    		size_t len2 = strlen(longName);
+				memcpy(mensajeAlarmaConNombre, mensajeAlarma, len1);
+    		memcpy(mensajeAlarmaConNombre + len1, longName, len2 + 1);  // +1 para copiar también '\0'
+				radioMesh.mandarTexto(mensajeAlarmaConNombre, len1 + len2 + 1);
+
+				// Pasar a un modo especial de emergencia, en este se pasa a un modo de bajo consumo: 
+				// 		se apagan los periféricos y se deja al micro en un estado de sleep hasta que se pulsa el botón
+				// 		cuando se pulsa el boton, se manda un mensaje de meshtastic y se vuelve a sleep
+				// el micro permanecerá en este estado hasta que se reinicie el dispositivo
+				entrarModoBajoConsumoSYSTEM_ONboton();
+			}
+		}
+	}
+////////////////////////////////////////
+#endif
+
+
+
 //////////////////////////////////////// Funciones del Watchdog
 	void setupWatchdogTimer(void) {
 			NRF_WDT->CONFIG         = 0x01;     										// Configure WDT to run when CPU is asleep
@@ -209,6 +255,127 @@ uint32_t  textoRecibidoLength = 0;
 		delay(10);
 	}
 //////////////////////////////////////// 
+
+
+//////////////////////////////////////// Modo de bajo consumo
+
+	#define PIN_BOTON_WAKEUP BUTTON
+
+	volatile bool botonWakeupPulsado = false;
+
+	void configurarBotonWakeupSystemOn() {
+		pinMode(PIN_BOTON_WAKEUP, INPUT_PULLUP);
+
+		nrf_gpio_cfg_sense_input(
+			g_ADigitalPinMap[PIN_BOTON_WAKEUP],
+			NRF_GPIO_PIN_PULLUP,
+			NRF_GPIO_PIN_SENSE_LOW
+		);
+	}
+
+	void apagarPerifericosModoBoton() {
+		pinMode(LED_BLUE, OUTPUT);
+		pinMode(LED_GREEN, OUTPUT);
+
+		digitalWrite(LED_BLUE, LOW);
+		digitalWrite(LED_GREEN, LOW);
+
+		radio.sleep();
+
+		Wire.end();
+		Wire1.end();
+		SPI.end();
+
+		#if (placaSiendoFlasheada == wistag)
+
+			digitalWrite(PIN_3V3_EN, LOW);
+			
+		#elif (placaSiendoFlasheada == wisblock)
+			//GPS (slots A y B)
+			digitalWrite(WB_IO1, LOW);
+			digitalWrite(WB_IO2, LOW);
+
+			//Acelerometro (slot C)
+			digitalWrite(WB_IO3, LOW);
+			digitalWrite(WB_IO4, LOW);
+		#endif
+	}
+
+	void encenderPerifericosModoBoton() {
+		// Reiniciar buses si los habías apagado
+		Wire.begin();
+		Wire1.begin();
+		SPI.begin();
+
+		#if (placaSiendoFlasheada == wisblock)
+			//GPS (slots A y B)
+			digitalWrite(WB_IO1, (usarGPS)? HIGH:LOW);
+			digitalWrite(WB_IO2, (usarGPS)? HIGH:LOW);
+
+			//Acelerometro (slot C)
+			digitalWrite(WB_IO3, (usarAcelerometro)? HIGH:LOW);
+			digitalWrite(WB_IO4, (usarAcelerometro)? HIGH:LOW);
+		#elif (placaSiendoFlasheada == wistag)
+
+			digitalWrite(PIN_3V3_EN, (usarAcelerometro || usarGPS)? HIGH:LOW);
+
+		#endif
+	}
+
+	void esperarEventoBajoConsumo() {
+		// Limpia eventos pendientes
+		__SEV();
+		__WFE();
+		__WFE();
+
+		// Aquí la CPU se duerme hasta que llegue un evento/interrupción
+	}
+
+	void entrarModoBajoConsumoSYSTEM_ONboton() {
+		configurarBotonWakeupSystemOn();
+		apagarPerifericosModoBoton();
+
+		while (true) {
+			// Dormir hasta evento
+			esperarEventoBajoConsumo();
+
+			// Al despertar, comprobar si fue el botón
+			if (digitalRead(PIN_BOTON_WAKEUP) == LOW) {
+				delay(30); // antirrebote simple
+
+				if (digitalRead(PIN_BOTON_WAKEUP) == LOW) {
+					encenderPerifericosModoBoton();
+
+					// Inicializar radio si hace falta después de sleep
+					if (!setupLoRa()) {
+						apagarPerifericosModoBoton();
+						continue;
+					}
+
+					radioMesh.editarConfig(nodeNum, longName, shortName, hopLimit, wantAck, viaMqtt);
+
+					const char mensaje[] = "!BOTON Wistag_Casco_Minero";
+					radioMesh.mandarTexto(mensaje, strlen(mensaje) + 1);
+
+					delay(500); // margen para terminar transmisión si mandarTexto no bloquea
+
+					radio.sleep();
+
+					// Esperar a que se suelte el botón para no reenviar continuamente
+					while (digitalRead(PIN_BOTON_WAKEUP) == LOW) {
+						delay(10);
+					}
+
+					delay(100);
+
+					apagarPerifericosModoBoton();
+					configurarBotonWakeupSystemOn();
+				}
+			}
+		}
+	}
+
+////////////////////////////////////////
 
 
 TaskHandle_t 				HANDLEtaskAlarmaTagBuzzerYled = NULL;
@@ -775,36 +942,6 @@ SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición
 #endif
 
 
-#if (placaSiendoFlasheada == wistag)
-//////////////////////////////////////// Cosas específicas de la Tag
-	#define BUZZER 21
-	#define BUTTON 9
-
-	volatile bool botonPulsado = false;
-	volatile uint32_t cuandoFuePulsado = 0xFFFFFFFF; // Tiempo máximo 
-
-	constexpr const char* mensajeAlarma = "!ALARMA de ";
-	char mensajeAlarmaConNombre[64];
-
-	void botonHaSidoPulsado(void){
-		if(digitalRead(BUTTON) == LOW){
-			botonPulsado = true;
-			cuandoFuePulsado = millis();
-			//Serial.printf("Boton pulsado\n");
-		}else{
-			if((unsigned)millis() - cuandoFuePulsado >= 3000){	// Se ha pulsado el botón durante más de 3 segundos, eso significa emergencia
-				size_t len1 = strlen(mensajeAlarma);
-    		size_t len2 = strlen(longName);
-				memcpy(mensajeAlarmaConNombre, mensajeAlarma, len1);
-    		memcpy(mensajeAlarmaConNombre + len1, longName, len2 + 1);  // +1 para copiar también '\0'
-				radioMesh.mandarTexto(mensajeAlarmaConNombre, len1 + len2 + 1);
-			}
-		}
-	}
-////////////////////////////////////////
-#endif
-
-
 
 
 void setup(){
@@ -1282,14 +1419,16 @@ void taskAlarmaTagBuzzerYled(void * pvParameters) {
 					vTaskDelay(pdMS_TO_TICKS(500));
 				}while(!botonPulsado);
 
-				#else
+			#else
+
 					for(int i=0; i<12; i++){
 						digitalWrite(LED_BLUE, HIGH);
 						vTaskDelay(pdMS_TO_TICKS(100));
 						digitalWrite(LED_BLUE, LOW);
 						vTaskDelay(pdMS_TO_TICKS(100));
 					}
-				#endif
+
+			#endif
 
 		}else{
 
@@ -1301,7 +1440,7 @@ void taskAlarmaTagBuzzerYled(void * pvParameters) {
 					tone(BUZZER, 3000);
 					vTaskDelay(pdMS_TO_TICKS(1000));
 				}while(!botonPulsado);
-					noTone(BUZZER);
+				noTone(BUZZER);
 				
 			#else 
 
