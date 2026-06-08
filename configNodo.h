@@ -42,7 +42,7 @@
 #define mandarTelemetria true
 
 
-#define mandarSerial false
+#define mandarSerial true
       ////////////////////////////////////////  Serial.print toggleable
         #if mandarSerial
           #define DPRINT(...) Serial.print(__VA_ARGS__)

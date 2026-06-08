@@ -11,6 +11,9 @@
 #include <nrf_gpio.h>
 
 
+#include "configNodo.h"
+
+
 #if (placaSiendoFlasheada == wisblock)
 	#include "SparkFunLIS3DH.h" //http://librarymanager/All#SparkFun-LIS3DH
 #endif
@@ -30,7 +33,6 @@ extern "C" {
 */
 
 
-#include "configNodo.h"
 
 
 
@@ -184,6 +186,7 @@ uint32_t  textoRecibidoLength = 0;
 	#define BUTTON 9
 
 	volatile bool botonPulsado = false;
+	volatile bool emergenciaSolicitada = false;
 	volatile uint32_t cuandoFuePulsado = 0xFFFFFFFF; // Tiempo máximo 
 
 	constexpr const char* mensajeAlarma = "!ALARMA de ";
@@ -196,7 +199,9 @@ uint32_t  textoRecibidoLength = 0;
 			//Serial.printf("Boton pulsado\n");
 		}else{
 			if((unsigned)millis() - cuandoFuePulsado >= 3000){	// Se ha pulsado el botón durante más de 3 segundos, eso significa emergencia
-				size_t len1 = strlen(mensajeAlarma);
+				emergenciaSolicitada = true;
+				
+				/*size_t len1 = strlen(mensajeAlarma);
     		size_t len2 = strlen(longName);
 				memcpy(mensajeAlarmaConNombre, mensajeAlarma, len1);
     		memcpy(mensajeAlarmaConNombre + len1, longName, len2 + 1);  // +1 para copiar también '\0'
@@ -207,8 +212,43 @@ uint32_t  textoRecibidoLength = 0;
 				// 		cuando se pulsa el boton, se manda un mensaje de meshtastic y se vuelve a sleep
 				// el micro permanecerá en este estado hasta que se reinicie el dispositivo
 				entrarModoBajoConsumoSYSTEM_ONboton();
+
+				//deshabilitado de momento*/
 			}
 		}
+	}
+
+	void gestionarEmergenciaSolicitada() {
+		if (!emergenciaSolicitada) {
+			return;
+		}
+
+		emergenciaSolicitada = false;
+
+		detachInterrupt(digitalPinToInterrupt(BUTTON));
+
+		size_t len1 = strlen(mensajeAlarma);
+		size_t len2 = strlen(longName);
+
+		memcpy(mensajeAlarmaConNombre, mensajeAlarma, len1);
+		memcpy(mensajeAlarmaConNombre + len1, longName, len2 + 1);
+
+		radioMesh.mandarTexto(mensajeAlarmaConNombre, len1 + len2 + 1);
+
+		delay(500);
+		feedWatchdog();
+
+		suspenderTasksNoNecesariasEmergencia();
+
+		while (digitalRead(BUTTON) == LOW) {
+			delay(10);
+			feedWatchdog();
+		}
+
+		delay(200);
+		feedWatchdog();
+
+		entrarModoBajoConsumoSYSTEM_ONboton();
 	}
 ////////////////////////////////////////
 #endif
@@ -217,7 +257,7 @@ uint32_t  textoRecibidoLength = 0;
 
 //////////////////////////////////////// Funciones del Watchdog
 	void setupWatchdogTimer(void) {
-			NRF_WDT->CONFIG         = 0x01;     										// Configure WDT to run when CPU is asleep
+			NRF_WDT->CONFIG         = 0x00;     										// Configure WDT to not run when CPU is asleep
 			NRF_WDT->CRV            = periodoWatchdog*32768 + 1;  	// timeout[s] = (CRV-1)/32768
 			NRF_WDT->RREN           = 0x01;     										// Enable the RR[0] reload register
 			NRF_WDT->TASKS_START    = 1;        										// Start WDT   
@@ -306,6 +346,8 @@ uint32_t  textoRecibidoLength = 0;
 		Wire.begin();
 		Wire1.begin();
 		SPI.begin();
+		radio.standby();
+		delay(20);
 
 		#if (placaSiendoFlasheada == wisblock)
 			//GPS (slots A y B)
@@ -336,77 +378,118 @@ uint32_t  textoRecibidoLength = 0;
 		apagarPerifericosModoBoton();
 
 		while (true) {
-			// Dormir hasta evento
 			esperarEventoBajoConsumo();
+			feedWatchdog();
 
-			// Al despertar, comprobar si fue el botón
 			if (digitalRead(PIN_BOTON_WAKEUP) == LOW) {
-				delay(30); // antirrebote simple
+				delay(30); // antirrebote
 
 				if (digitalRead(PIN_BOTON_WAKEUP) == LOW) {
 					encenderPerifericosModoBoton();
 
-					// Inicializar radio si hace falta después de sleep
-					if (!setupLoRa()) {
-						apagarPerifericosModoBoton();
-						continue;
-					}
+					char mensaje[64] = "";
+					strcpy(mensaje, "!BOTON ");
+					strcat(mensaje, longName);
 
-					radioMesh.editarConfig(nodeNum, longName, shortName, hopLimit, wantAck, viaMqtt);
-
-					const char mensaje[] = "!BOTON Wistag_Casco_Minero";
 					radioMesh.mandarTexto(mensaje, strlen(mensaje) + 1);
 
-					delay(500); // margen para terminar transmisión si mandarTexto no bloquea
+					delay(500);
+					feedWatchdog();
+
+					DPRINTLN("Boton pulsado en modo de bajo consumo");
+					#if mandarSerial
+						Serial.flush();
+					#endif
 
 					radio.sleep();
 
-					// Esperar a que se suelte el botón para no reenviar continuamente
 					while (digitalRead(PIN_BOTON_WAKEUP) == LOW) {
 						delay(10);
-					}
-
-					delay(100);
+						feedWatchdog();
+					}					
 
 					apagarPerifericosModoBoton();
 					configurarBotonWakeupSystemOn();
+					feedWatchdog();
 				}
 			}
 		}
 	}
-
 ////////////////////////////////////////
 
 
-TaskHandle_t 				HANDLEtaskAlarmaTagBuzzerYled = NULL;
-SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición del puntero "pLecturaBCM"
 //////////////////////////////////////// Tasks de FreeRTOS
+	TaskHandle_t HANDLEtaskIMU = NULL;
+	TaskHandle_t HANDLEtaskProcesado = NULL;
+	TaskHandle_t HANDLEtaskMeshtasticMandarTexto = NULL;
+	TaskHandle_t HANDLEtaskMeshtasticMandarGPS = NULL;
+	TaskHandle_t HANDLEtaskLeerGPS = NULL;
+	TaskHandle_t HANDLEtaskAlarmaTagBuzzerYled = NULL;
+	TaskHandle_t HANDLEtaskMeshtasticRecibir = NULL;
+	TaskHandle_t HANDLEtaskMeshtasticMandarTelemetriaYnodeID = NULL;
+
+	SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición del puntero "pLecturaBCM"
+
 	void crearTasks(){
 		#if usarAcelerometro
 			imuBufferMutex = xSemaphoreCreateMutex();
 			if (imuBufferMutex == NULL) {
 				Serial.println("Error creando imuBufferMutex");
 			}
-			xTaskCreate(taskIMU,"TaskIMU",512,NULL,11,NULL);
+			xTaskCreate(taskIMU,"TaskIMU",512,NULL,11,&HANDLEtaskIMU);
 
-			xTaskCreate(taskProcesado,"taskProcesado",2048,NULL,1,NULL);			
+			xTaskCreate(taskProcesado,"taskProcesado",2048,NULL,1,&HANDLEtaskProcesado);			
 		#endif
 
 		#if mandarMeshtastic
-			xTaskCreate(taskMeshtasticMandarTexto,"TaskMensajeMeshtastic",2048,NULL,4,NULL);
+			xTaskCreate(taskMeshtasticMandarTexto,"TaskMensajeMeshtastic",2048,NULL,4,&HANDLEtaskMeshtasticMandarTexto);
 		#endif
 
 		#if (mandarMeshtastic && usarGPS)
-			xTaskCreate(taskMeshtasticMandarGPS,"TaskMensajeGPS",2048,NULL,3,NULL);
+			xTaskCreate(taskMeshtasticMandarGPS,"TaskMensajeGPS",2048,NULL,3,&HANDLEtaskMeshtasticMandarGPS);
 
-			xTaskCreate(taskLeerGPS,"TaskLeerGPS",2048,NULL,2,NULL);
+			xTaskCreate(taskLeerGPS,"TaskLeerGPS",2048,NULL,2,&HANDLEtaskLeerGPS);
 		#endif
 
 		xTaskCreate(taskAlarmaTagBuzzerYled,"TaskAlarmaTagBuzzerYled",512,NULL,7,&HANDLEtaskAlarmaTagBuzzerYled); // Puede tener prioridad alta porque ocupa poco tiempo de cómputo y así no se entrecorta el zumbador
 
-		xTaskCreate(taskMeshtasticRecibir,"taskMeshtasticRecibir",2048,NULL,6,NULL); // Puede tener mensajes de alarma, alta prioridad
+		xTaskCreate(taskMeshtasticRecibir,"taskMeshtasticRecibir",2048,NULL,6,&HANDLEtaskMeshtasticRecibir); // Puede tener mensajes de alarma, alta prioridad
 
-		xTaskCreate(taskMeshtasticMandarTelemetriaYnodeID,"taskMeshtasticMandarTelemetriaYnodeID",2048,NULL,2,NULL);
+		xTaskCreate(taskMeshtasticMandarTelemetriaYnodeID,"taskMeshtasticMandarTelemetriaYnodeID",2048,NULL,2,&HANDLEtaskMeshtasticMandarTelemetriaYnodeID);
+	}
+
+	void suspenderTasksNoNecesariasEmergencia() {
+		if (HANDLEtaskIMU != NULL) {
+			vTaskSuspend(HANDLEtaskIMU);
+		}
+
+		if (HANDLEtaskProcesado != NULL) {
+			vTaskSuspend(HANDLEtaskProcesado);
+		}
+
+		if (HANDLEtaskMeshtasticMandarTexto != NULL) {
+			vTaskSuspend(HANDLEtaskMeshtasticMandarTexto);
+		}
+
+		if (HANDLEtaskMeshtasticMandarGPS != NULL) {
+			vTaskSuspend(HANDLEtaskMeshtasticMandarGPS);
+		}
+
+		if (HANDLEtaskLeerGPS != NULL) {
+			vTaskSuspend(HANDLEtaskLeerGPS);
+		}
+
+		if (HANDLEtaskAlarmaTagBuzzerYled != NULL) {
+			vTaskSuspend(HANDLEtaskAlarmaTagBuzzerYled);
+		}
+
+		if (HANDLEtaskMeshtasticRecibir != NULL) {
+			vTaskSuspend(HANDLEtaskMeshtasticRecibir);
+		}
+
+		if (HANDLEtaskMeshtasticMandarTelemetriaYnodeID != NULL) {
+			vTaskSuspend(HANDLEtaskMeshtasticMandarTelemetriaYnodeID);
+		}
 	}
 //////////////////////////////////////// 
 
@@ -951,9 +1034,7 @@ void setup(){
 		if ((millis() - timeout) < 5000){      delay(100);    }
     else														{      break;    			}
 	}
-
-	setupWatchdogTimer();
-
+	
 	/*radioMutex = xSemaphoreCreateMutex();
 	if(radioMutex == NULL){
 		Serial.println("Error creando radioMutex");
@@ -1004,6 +1085,10 @@ void setup(){
 	#if mandarMeshtastic
 		radioMesh.mandarNodeID();
 	#endif
+
+	setupWatchdogTimer();
+	// Apagado de momento, ya que cuando es pasa a modo "sleep hasta que se pulse el botón" el watchdog sigue contanoo y este no se puede parar una vez se ha iniciado
+
 	delay(500);
 }
 
@@ -1011,10 +1096,11 @@ void setup(){
 
 bool LEDencendido = false;
 uint32_t ultimosMilis = 0;
-uint32_t milisON = 500, milisPeriodo = 5000; // 10% duty
+uint32_t milisON = 500, milisPeriodo = 1000; // 10% duty
 
 void loop(){ // Se usa para cambiar el LED (para ver que la placa no haya crasheado) y para alimentar el Watchdog
-	//suspendLoop();
+
+  gestionarEmergenciaSolicitada(); // Por si se ha pulsado el botón durante más de 3 segundos, pasando a un modo de bajo consumo
 
 	// máquina de estados simple
 	if(LEDencendido){
