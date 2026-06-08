@@ -342,7 +342,6 @@ uint32_t  textoRecibidoLength = 0;
 	}
 
 	void encenderPerifericosModoBoton() {
-		// Reiniciar buses si los habías apagado
 		Wire.begin();
 		Wire1.begin();
 		SPI.begin();
@@ -369,7 +368,6 @@ uint32_t  textoRecibidoLength = 0;
 		__SEV();
 		__WFE();
 		__WFE();
-
 		// Aquí la CPU se duerme hasta que llegue un evento/interrupción
 	}
 
@@ -1096,7 +1094,7 @@ void setup(){
 
 bool LEDencendido = false;
 uint32_t ultimosMilis = 0;
-uint32_t milisON = 500, milisPeriodo = 1000; // 10% duty
+uint32_t milisON = 10, milisPeriodo = 1000; // 10% duty
 
 void loop(){ // Se usa para cambiar el LED (para ver que la placa no haya crasheado) y para alimentar el Watchdog
 
