@@ -72,9 +72,9 @@
     constexpr char*     longName  = "WisMesh_wisblock_Arduino";
     constexpr char*     shortName = "0304";
   #elif (placaSiendoFlasheada == wistag)
-    constexpr uint32_t  nodeNum   = 0x01020300;
-    constexpr char*     longName  = "Wistag_Casco_Minero";
-    constexpr char*     shortName = "0300";
+    constexpr uint32_t  nodeNum   = 0x01020300;               //0x01020300;
+    constexpr char*     longName  = "Wistag_Casco_Minero";    //"Wistag_Casco_Minero";
+    constexpr char*     shortName = "0300";                   //"0300";
   #endif
   constexpr uint8_t   hopLimit  = 7;
   constexpr bool      wantAck   = false;

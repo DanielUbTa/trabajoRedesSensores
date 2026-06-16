@@ -233,6 +233,7 @@ uint32_t  textoRecibidoLength = 0;
 		memcpy(mensajeAlarmaConNombre, mensajeAlarma, len1);
 		memcpy(mensajeAlarmaConNombre + len1, longName, len2 + 1);
 
+		//radioMesh.mandarAlarma(mensajeAlarmaConNombre, len1 + len2 + 1); 	//Las alarmas no se suben a MQTT
 		radioMesh.mandarTexto(mensajeAlarmaConNombre, len1 + len2 + 1);
 
 		delay(500);
@@ -389,6 +390,7 @@ uint32_t  textoRecibidoLength = 0;
 					strcpy(mensaje, "!BOTON ");
 					strcat(mensaje, longName);
 
+					//radioMesh.mandarAlarma(mensaje, strlen(mensaje) + 1); //Las alarmas no se suben a MQTT
 					radioMesh.mandarTexto(mensaje, strlen(mensaje) + 1);
 
 					delay(500);
@@ -1029,7 +1031,7 @@ void setup(){
 	time_t timeout = millis();
 	Serial.begin(1000000);
 	while (!Serial){
-		if ((millis() - timeout) < 5000){      delay(100);    }
+		if ((millis() - timeout) < 1000){      delay(100);    }
     else														{      break;    			}
 	}
 	
@@ -1087,7 +1089,7 @@ void setup(){
 	setupWatchdogTimer();
 	// Apagado de momento, ya que cuando es pasa a modo "sleep hasta que se pulse el botón" el watchdog sigue contanoo y este no se puede parar una vez se ha iniciado
 
-	delay(500);
+	delay(250);
 }
 
 
@@ -1387,7 +1389,12 @@ void taskMeshtasticMandarTexto(void *pvParameters) {
 					#endif*/
 
 					if (bufferMeshtasticLength > 0) {
-						radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
+						if (estadoFiltradoActual == ESTADO_CAIDA) {
+							//radioMesh.mandarAlarma(bufferMeshtastic, bufferMeshtasticLength); 	//Las alarmas no se suben a MQTT
+							radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
+						}else{
+							radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
+						}
 
 						ultimoEstadoEnviado = estadoFiltradoActual;
 						primerEstadoEnviado = false;
@@ -1462,6 +1469,23 @@ void taskMeshtasticRecibir(void *pvParameters) {
 							g_BleUart.println(texto);
 						}
 					#endif*/
+
+					DPRINTLN();
+
+          memcpy(textoRecibido, texto, textoLen + 1);
+          textoRecibidoLength = textoLen;
+        }
+
+				if (radioMesh.decodificarSiEsAlarma(msg.data + 16, msg.len - 16, texto, sizeof(texto), &textoLen)) {
+          DPRINT("Recibida Alarma: ");
+          DPRINT(texto);
+
+					// #if usarBluetooth
+					// 	if(g_BleUartConnected){
+					// 		DPRINT("		Mandando por Bluetooth");
+					// 		g_BleUart.println(texto);
+					// 	}
+					// #endif
 
 					DPRINTLN();
 

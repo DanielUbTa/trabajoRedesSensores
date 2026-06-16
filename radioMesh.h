@@ -169,6 +169,24 @@ public:
                    int8_t hopLimit = -1,
                    int8_t wantAck = -1);
 
+    /*!
+    \brief  Como un mensaje de texto pero usado para alertas crítcas
+    \param  txt: string en ASCII/UTF-8 con el texto a enviar
+    \param  length: longitud de la string a mandar
+    \param  channelIndex: índice de canal (0..7). Por defecto 0
+    \param  toNodeNum: destino (0xFFFFFFFF = broadcast)
+    \param  nextHop: último byte del nodeNum del relé preferido (0 = flooding normal)
+    \param  hopLimit: número máximo de saltos (0..7). Si es -1 se usa el de MeshConfig
+    \param  wantAck: solicitar ACK. Si es -1 se usa el de MeshConfig
+    \returns true si el mensaje se ha encolado correctamente; false en caso contrario
+  */
+  bool mandarAlarma(const char* txt, uint32_t length,
+                    uint8_t channelIndex = 0,
+                    uint32_t toNodeNum = 0xFFFFFFFF,
+                    uint8_t nextHop = 0,
+                    int8_t hopLimit = -1,
+                    int8_t wantAck = -1);
+
   /*!
     \brief  Para mandar mensajes binarios por el PortNum de PRIVATE, 256
     \param  data: array de bytes a enviar
@@ -214,6 +232,19 @@ public:
   bool decodificarSiEsTexto(const uint8_t* PBarray, uint32_t PBlength,
                             char* StringArray, uint32_t StringArraySize,
                             uint32_t* StringLength);
+
+  /*!
+    \brief  Exactamente igual a "decodificarSiEsTexto" excepto por el cambio de PortNum (al PortNum 11)
+    \param  PBarray: array de bytes que contiene el protobuf serializado
+    \param  PBlength: número de bytes del protobuf de entrada
+    \param  StringArray: buffer de salida donde se copiará el texto decodificado
+    \param  StringArraySize: tamaño del buffer de salida
+    \param  StringLength: puntero donde se devolverá la longitud del texto extraído
+    \returns true si el protobuf contiene un mensaje de texto válido; false en caso contrario
+  */
+  bool decodificarSiEsAlarma(const uint8_t* PBarray, uint32_t PBlength,
+                             char* StringArray, uint32_t StringArraySize,
+                             uint32_t* StringLength);
 
   /*!
     \brief  Decodifica un protobuf Data si contiene una payload binaria PRIVATE_APP
