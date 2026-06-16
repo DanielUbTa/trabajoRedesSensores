@@ -396,6 +396,13 @@ uint32_t  textoRecibidoLength = 0;
 					delay(500);
 					feedWatchdog();
 
+					float battVoltageMiliVolt = readVBAT();
+					char battPercentage = mvToPercent(battVoltageMiliVolt);
+					radioMesh.mandarTelemetry(battPercentage, battVoltageMiliVolt*0.001,-1.0,-1.0);
+					
+					delay(500);
+					feedWatchdog();
+
 					DPRINTLN("Boton pulsado en modo de bajo consumo");
 					#if mandarSerial
 						Serial.flush();
