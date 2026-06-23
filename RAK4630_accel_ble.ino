@@ -297,7 +297,7 @@ uint32_t  textoRecibidoLength = 0;
 	}
 //////////////////////////////////////// 
 
-
+#if (placaSiendoFlasheada == wistag)
 //////////////////////////////////////// Modo de bajo consumo
 
 	#define PIN_BOTON_WAKEUP BUTTON
@@ -423,7 +423,7 @@ uint32_t  textoRecibidoLength = 0;
 		}
 	}
 ////////////////////////////////////////
-
+#endif
 
 //////////////////////////////////////// Tasks de FreeRTOS
 	TaskHandle_t HANDLEtaskIMU = NULL;
@@ -1106,8 +1106,10 @@ uint32_t ultimosMilis = 0;
 uint32_t milisON = 10, milisPeriodo = 1000; // 10% duty
 
 void loop(){ // Se usa para cambiar el LED (para ver que la placa no haya crasheado) y para alimentar el Watchdog
-
+	
+	#if (placaSiendoFlasheada == wistag)
   gestionarEmergenciaSolicitada(); // Por si se ha pulsado el botón durante más de 3 segundos, pasando a un modo de bajo consumo
+	#endif
 
 	// máquina de estados simple
 	if(LEDencendido){
@@ -1318,7 +1320,7 @@ void taskMeshtasticMandarTexto(void *pvParameters) {
 
 			bool estadoHaCambiado = primerEstadoEnviado || (estadoFiltradoActual != ultimoEstadoEnviado);
 
-			if (estadoHaCambiado) {
+			if (estadoHaCambiado /*|| true*/) { // TODO DESFORZAR para no llenar la red de mensajes
 				const char *estadoTexto = "no reconocido";
 
 				switch (estadoFiltradoActual) {

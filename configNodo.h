@@ -57,7 +57,7 @@
 
 #if (placaSiendoFlasheada == wistag)
 
-  #define calladitoEstaMasGuapo true
+  #define calladitoEstaMasGuapo false
         // true para que no pite la wistag
 
 #endif
@@ -72,9 +72,9 @@
     constexpr char*     longName  = "WisMesh_wisblock_Arduino";
     constexpr char*     shortName = "0304";
   #elif (placaSiendoFlasheada == wistag)
-    constexpr uint32_t  nodeNum   = 0x01020301;               //0x01020300;
-    constexpr char*     longName  = "WisMesh_wistag_Arduino_1";    //"Wistag_Casco_Minero";
-    constexpr char*     shortName = "0301";                   //"0300";
+    constexpr uint32_t  nodeNum   = 0x01020301;               //0x01020300;               0x01020301;
+    constexpr char*     longName  = "WisMesh_wistag_Arduino_1";    //"Wistag_Casco_Minero";    "WisMesh_wistag_Arduino_1";
+    constexpr char*     shortName = "0301";                   //"0300";                   "0301";
   #endif
   constexpr uint8_t   hopLimit  = 7;
   constexpr bool      wantAck   = false;
@@ -90,7 +90,7 @@
   constexpr uint16_t 	preamble = 12;
   constexpr uint8_t	 	syncWord = 0x2B;
   constexpr float  		freqMHz  = 866.0;
-  constexpr uint8_t 	sf 			 = 5;
+  constexpr uint8_t 	sf 			 = 7;
   constexpr float 		bw       = 250.0;
   constexpr uint8_t	 	cr 			 = 5;
 
@@ -115,7 +115,7 @@
   constexpr uint32_t bCMtamano = 8192;    // Debe ser tan grande como para poder guardar 2 segundos de datos a 1600 Hz
 
 			#if (placaSiendoFlasheada == wisblock)
-        constexpr uint32_t freqIMU = 50;	  						//Hz.  Can be: 0,1,10,25,50,100,200,400,1600,5000 Hz
+        constexpr uint32_t freqIMU = 400;	  						//Hz.  Can be: 0,1,10,25,50,100,200,400,1600,5000 Hz
 			#elif (placaSiendoFlasheada == wistag)
 				#define            freqIMU LIS2DH12_ODR_50Hz
           // Can be LIS2DH12_ODR_1Hz, LIS2DH12_ODR_1Hz, LIS2DH12_ODR_10Hz, LIS2DH12_ODR_25Hz, LIS2DH12_ODR_50Hz, LIS2DH12_ODR_100Hz, LIS2DH12_ODR_200Hz, LIS2DH12_ODR_400Hz, LIS2DH12_ODR_1kHz620_LP, LIS2DH12_ODR_5kHz376_LP_1kHz344_NM_HP, 
