@@ -370,6 +370,16 @@ bool MeshtasticRadio::mandarTexto(const char* txt, uint32_t length,
                    channelIndex, toNodeNum, nextHop, hopLimit, wantAck);
 }
 
+bool MeshtasticRadio::mandarAlarma(const char* txt, uint32_t length,
+                                  uint8_t channelIndex,
+                                  uint32_t toNodeNum, uint8_t nextHop,
+                                  int8_t hopLimit, int8_t wantAck)
+{
+  return sendData_((meshtastic_PortNum)11, /* Este es un Portnum específico para mandar alarmas, pero no está en la librería de los protobufs*/
+                   reinterpret_cast<const uint8_t*>(txt), (size_t)length,
+                   channelIndex, toNodeNum, nextHop, hopLimit, wantAck);
+}
+
 bool MeshtasticRadio::mandarBinario(const uint8_t* data, uint32_t length,
                                     uint8_t channelIndex,
                                     uint32_t toNodeNum, uint8_t nextHop,
@@ -429,6 +439,40 @@ bool MeshtasticRadio::decodificarSiEsTexto(const uint8_t* PBarray, uint32_t PBle
   }
 
   if (msg.portnum != meshtastic_PortNum_TEXT_MESSAGE_APP) {
+    return false;
+  }
+
+  uint32_t textLen = msg.payload.size;
+  if (textLen >= StringArraySize) {
+    textLen = StringArraySize - 1;
+  }
+
+  memcpy(StringArray, msg.payload.bytes, textLen);
+  StringArray[textLen] = '\0';
+  *StringLength = textLen;
+
+  return true;
+}
+
+
+bool MeshtasticRadio::decodificarSiEsAlarma(const uint8_t* PBarray, uint32_t PBlength,
+                                            char* StringArray, uint32_t StringArraySize,
+                                            uint32_t* StringLength)
+{
+  if (PBarray == nullptr || StringArray == nullptr || StringLength == nullptr || StringArraySize == 0) {
+    return false;
+  }
+
+  StringArray[0] = '\0';
+  *StringLength = 0;
+
+  meshtastic_Data msg = meshtastic_Data_init_zero;
+  pb_istream_t s1 = pb_istream_from_buffer(PBarray, PBlength);
+  if (!pb_decode(&s1, meshtastic_Data_fields, &msg)) {
+    return false;
+  }
+
+  if (msg.portnum != (meshtastic_PortNum)11 /* Este es un Portnum específico para mandar alarmas, pero no está en la librería de los protobufs*/) {
     return false;
   }
 

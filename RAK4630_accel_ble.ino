@@ -4,8 +4,15 @@
 
 #include <RadioLib.h>
 #include <TinyGPSPlus.h>
-#include <TimeLib.h>   // Para conversion a tiempo UNIX
-#include <nrf52840.h>  // Para el watchdog
+#include <TimeLib.h>   	// Para conversion a tiempo UNIX
+#include <nrf52840.h>  	// Para el watchdog
+
+#include <nrf.h>				// Para el control de consumo
+#include <nrf_gpio.h>
+
+
+#include "configNodo.h"
+
 
 #if (placaSiendoFlasheada == wisblock)
 	#include "SparkFunLIS3DH.h" //http://librarymanager/All#SparkFun-LIS3DH
@@ -26,7 +33,6 @@ extern "C" {
 */
 
 
-#include "configNodo.h"
 
 
 
@@ -44,6 +50,11 @@ extern "C" {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+// TODO en caso de emergencia, interesaría pasar a un modo de super bajo consumo en el que el minero pudiese pulsar el botón periodicamente para saber si sigue bien
 
 
 
@@ -169,9 +180,85 @@ uint32_t  textoRecibidoLength = 0;
 
 
 
+#if (placaSiendoFlasheada == wistag)
+//////////////////////////////////////// Cosas específicas de la Tag. Incluye interrupciones por botón y modo de sleep en cuant se manda un mensaje de emergencia
+	#define BUZZER 21
+	#define BUTTON 9
+
+	volatile bool botonPulsado = false;
+	volatile bool emergenciaSolicitada = false;
+	volatile uint32_t cuandoFuePulsado = 0xFFFFFFFF; // Tiempo máximo 
+
+	constexpr const char* mensajeAlarma = "!ALARMA de ";
+	char mensajeAlarmaConNombre[64];
+
+	void botonHaSidoPulsado(void){
+		if(digitalRead(BUTTON) == LOW){
+			botonPulsado = true;
+			cuandoFuePulsado = millis();
+			//Serial.printf("Boton pulsado\n");
+		}else{
+			if((unsigned)millis() - cuandoFuePulsado >= 3000){	// Se ha pulsado el botón durante más de 3 segundos, eso significa emergencia
+				emergenciaSolicitada = true;
+				
+				/*size_t len1 = strlen(mensajeAlarma);
+    		size_t len2 = strlen(longName);
+				memcpy(mensajeAlarmaConNombre, mensajeAlarma, len1);
+    		memcpy(mensajeAlarmaConNombre + len1, longName, len2 + 1);  // +1 para copiar también '\0'
+				radioMesh.mandarTexto(mensajeAlarmaConNombre, len1 + len2 + 1);
+
+				// Pasar a un modo especial de emergencia, en este se pasa a un modo de bajo consumo: 
+				// 		se apagan los periféricos y se deja al micro en un estado de sleep hasta que se pulsa el botón
+				// 		cuando se pulsa el boton, se manda un mensaje de meshtastic y se vuelve a sleep
+				// el micro permanecerá en este estado hasta que se reinicie el dispositivo
+				entrarModoBajoConsumoSYSTEM_ONboton();
+
+				//deshabilitado de momento*/
+			}
+		}
+	}
+
+	void gestionarEmergenciaSolicitada() {
+		if (!emergenciaSolicitada) {
+			return;
+		}
+
+		emergenciaSolicitada = false;
+
+		detachInterrupt(digitalPinToInterrupt(BUTTON));
+
+		size_t len1 = strlen(mensajeAlarma);
+		size_t len2 = strlen(longName);
+
+		memcpy(mensajeAlarmaConNombre, mensajeAlarma, len1);
+		memcpy(mensajeAlarmaConNombre + len1, longName, len2 + 1);
+
+		//radioMesh.mandarAlarma(mensajeAlarmaConNombre, len1 + len2 + 1); 	//Las alarmas no se suben a MQTT
+		radioMesh.mandarTexto(mensajeAlarmaConNombre, len1 + len2 + 1);
+
+		delay(500);
+		feedWatchdog();
+
+		suspenderTasksNoNecesariasEmergencia();
+
+		while (digitalRead(BUTTON) == LOW) {
+			delay(10);
+			feedWatchdog();
+		}
+
+		delay(200);
+		feedWatchdog();
+
+		entrarModoBajoConsumoSYSTEM_ONboton();
+	}
+////////////////////////////////////////
+#endif
+
+
+
 //////////////////////////////////////// Funciones del Watchdog
 	void setupWatchdogTimer(void) {
-			NRF_WDT->CONFIG         = 0x01;     										// Configure WDT to run when CPU is asleep
+			NRF_WDT->CONFIG         = 0x00;     										// Configure WDT to not run when CPU is asleep
 			NRF_WDT->CRV            = periodoWatchdog*32768 + 1;  	// timeout[s] = (CRV-1)/32768
 			NRF_WDT->RREN           = 0x01;     										// Enable the RR[0] reload register
 			NRF_WDT->TASKS_START    = 1;        										// Start WDT   
@@ -211,35 +298,205 @@ uint32_t  textoRecibidoLength = 0;
 //////////////////////////////////////// 
 
 
-TaskHandle_t 				HANDLEtaskAlarmaTagBuzzerYled = NULL;
-SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición del puntero "pLecturaBCM"
+//////////////////////////////////////// Modo de bajo consumo
+
+	#define PIN_BOTON_WAKEUP BUTTON
+
+	volatile bool botonWakeupPulsado = false;
+
+	void configurarBotonWakeupSystemOn() {
+		pinMode(PIN_BOTON_WAKEUP, INPUT_PULLUP);
+
+		nrf_gpio_cfg_sense_input(
+			g_ADigitalPinMap[PIN_BOTON_WAKEUP],
+			NRF_GPIO_PIN_PULLUP,
+			NRF_GPIO_PIN_SENSE_LOW
+		);
+	}
+
+	void apagarPerifericosModoBoton() {
+		pinMode(LED_BLUE, OUTPUT);
+		pinMode(LED_GREEN, OUTPUT);
+
+		digitalWrite(LED_BLUE, LOW);
+		digitalWrite(LED_GREEN, LOW);
+
+		radio.sleep();
+
+		Wire.end();
+		Wire1.end();
+		SPI.end();
+
+		#if (placaSiendoFlasheada == wistag)
+
+			digitalWrite(PIN_3V3_EN, LOW);
+			
+		#elif (placaSiendoFlasheada == wisblock)
+			//GPS (slots A y B)
+			digitalWrite(WB_IO1, LOW);
+			digitalWrite(WB_IO2, LOW);
+
+			//Acelerometro (slot C)
+			digitalWrite(WB_IO3, LOW);
+			digitalWrite(WB_IO4, LOW);
+		#endif
+	}
+
+	void encenderPerifericosModoBoton() {
+		Wire.begin();
+		Wire1.begin();
+		SPI.begin();
+		radio.standby();
+		delay(20);
+
+		#if (placaSiendoFlasheada == wisblock)
+			//GPS (slots A y B)
+			digitalWrite(WB_IO1, (usarGPS)? HIGH:LOW);
+			digitalWrite(WB_IO2, (usarGPS)? HIGH:LOW);
+
+			//Acelerometro (slot C)
+			digitalWrite(WB_IO3, (usarAcelerometro)? HIGH:LOW);
+			digitalWrite(WB_IO4, (usarAcelerometro)? HIGH:LOW);
+		#elif (placaSiendoFlasheada == wistag)
+
+			digitalWrite(PIN_3V3_EN, (usarAcelerometro || usarGPS)? HIGH:LOW);
+
+		#endif
+	}
+
+	void esperarEventoBajoConsumo() {
+		// Limpia eventos pendientes
+		__SEV();
+		__WFE();
+		__WFE();
+		// Aquí la CPU se duerme hasta que llegue un evento/interrupción
+	}
+
+	void entrarModoBajoConsumoSYSTEM_ONboton() {
+		configurarBotonWakeupSystemOn();
+		apagarPerifericosModoBoton();
+
+		while (true) {
+			esperarEventoBajoConsumo();
+			feedWatchdog();
+
+			if (digitalRead(PIN_BOTON_WAKEUP) == LOW) {
+				delay(30); // antirrebote
+
+				if (digitalRead(PIN_BOTON_WAKEUP) == LOW) {
+					encenderPerifericosModoBoton();
+
+					char mensaje[64] = "";
+					strcpy(mensaje, "!BOTON ");
+					strcat(mensaje, longName);
+
+					//radioMesh.mandarAlarma(mensaje, strlen(mensaje) + 1); //Las alarmas no se suben a MQTT
+					radioMesh.mandarTexto(mensaje, strlen(mensaje) + 1);
+
+					delay(500);
+					feedWatchdog();
+
+					float battVoltageMiliVolt = readVBAT();
+					char battPercentage = mvToPercent(battVoltageMiliVolt);
+					radioMesh.mandarTelemetry(battPercentage, battVoltageMiliVolt*0.001,-1.0,-1.0);
+					
+					delay(500);
+					feedWatchdog();
+
+					DPRINTLN("Boton pulsado en modo de bajo consumo");
+					#if mandarSerial
+						Serial.flush();
+					#endif
+
+					radio.sleep();
+
+					while (digitalRead(PIN_BOTON_WAKEUP) == LOW) {
+						delay(10);
+						feedWatchdog();
+					}					
+
+					apagarPerifericosModoBoton();
+					configurarBotonWakeupSystemOn();
+					feedWatchdog();
+				}
+			}
+		}
+	}
+////////////////////////////////////////
+
+
 //////////////////////////////////////// Tasks de FreeRTOS
+	TaskHandle_t HANDLEtaskIMU = NULL;
+	TaskHandle_t HANDLEtaskProcesado = NULL;
+	TaskHandle_t HANDLEtaskMeshtasticMandarTexto = NULL;
+	TaskHandle_t HANDLEtaskMeshtasticMandarGPS = NULL;
+	TaskHandle_t HANDLEtaskLeerGPS = NULL;
+	TaskHandle_t HANDLEtaskAlarmaTagBuzzerYled = NULL;
+	TaskHandle_t HANDLEtaskMeshtasticRecibir = NULL;
+	TaskHandle_t HANDLEtaskMeshtasticMandarTelemetriaYnodeID = NULL;
+
+	SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición del puntero "pLecturaBCM"
+
 	void crearTasks(){
 		#if usarAcelerometro
 			imuBufferMutex = xSemaphoreCreateMutex();
 			if (imuBufferMutex == NULL) {
 				Serial.println("Error creando imuBufferMutex");
 			}
-			xTaskCreate(taskIMU,"TaskIMU",512,NULL,11,NULL);
+			xTaskCreate(taskIMU,"TaskIMU",512,NULL,11,&HANDLEtaskIMU);
 
-			xTaskCreate(taskProcesado,"taskProcesado",2048,NULL,1,NULL);			
+			xTaskCreate(taskProcesado,"taskProcesado",2048,NULL,1,&HANDLEtaskProcesado);			
 		#endif
 
 		#if mandarMeshtastic
-			xTaskCreate(taskMeshtasticMandarTexto,"TaskMensajeMeshtastic",2048,NULL,4,NULL);
+			xTaskCreate(taskMeshtasticMandarTexto,"TaskMensajeMeshtastic",2048,NULL,4,&HANDLEtaskMeshtasticMandarTexto);
 		#endif
 
 		#if (mandarMeshtastic && usarGPS)
-			xTaskCreate(taskMeshtasticMandarGPS,"TaskMensajeGPS",2048,NULL,3,NULL);
+			xTaskCreate(taskMeshtasticMandarGPS,"TaskMensajeGPS",2048,NULL,3,&HANDLEtaskMeshtasticMandarGPS);
 
-			xTaskCreate(taskLeerGPS,"TaskLeerGPS",2048,NULL,2,NULL);
+			xTaskCreate(taskLeerGPS,"TaskLeerGPS",2048,NULL,2,&HANDLEtaskLeerGPS);
 		#endif
 
 		xTaskCreate(taskAlarmaTagBuzzerYled,"TaskAlarmaTagBuzzerYled",512,NULL,7,&HANDLEtaskAlarmaTagBuzzerYled); // Puede tener prioridad alta porque ocupa poco tiempo de cómputo y así no se entrecorta el zumbador
 
-		xTaskCreate(taskMeshtasticRecibir,"taskMeshtasticRecibir",2048,NULL,6,NULL); // Puede tener mensajes de alarma, alta prioridad
+		xTaskCreate(taskMeshtasticRecibir,"taskMeshtasticRecibir",2048,NULL,6,&HANDLEtaskMeshtasticRecibir); // Puede tener mensajes de alarma, alta prioridad
 
-		xTaskCreate(taskMeshtasticMandarTelemetriaYnodeID,"taskMeshtasticMandarTelemetriaYnodeID",2048,NULL,2,NULL);
+		xTaskCreate(taskMeshtasticMandarTelemetriaYnodeID,"taskMeshtasticMandarTelemetriaYnodeID",2048,NULL,2,&HANDLEtaskMeshtasticMandarTelemetriaYnodeID);
+	}
+
+	void suspenderTasksNoNecesariasEmergencia() {
+		if (HANDLEtaskIMU != NULL) {
+			vTaskSuspend(HANDLEtaskIMU);
+		}
+
+		if (HANDLEtaskProcesado != NULL) {
+			vTaskSuspend(HANDLEtaskProcesado);
+		}
+
+		if (HANDLEtaskMeshtasticMandarTexto != NULL) {
+			vTaskSuspend(HANDLEtaskMeshtasticMandarTexto);
+		}
+
+		if (HANDLEtaskMeshtasticMandarGPS != NULL) {
+			vTaskSuspend(HANDLEtaskMeshtasticMandarGPS);
+		}
+
+		if (HANDLEtaskLeerGPS != NULL) {
+			vTaskSuspend(HANDLEtaskLeerGPS);
+		}
+
+		if (HANDLEtaskAlarmaTagBuzzerYled != NULL) {
+			vTaskSuspend(HANDLEtaskAlarmaTagBuzzerYled);
+		}
+
+		if (HANDLEtaskMeshtasticRecibir != NULL) {
+			vTaskSuspend(HANDLEtaskMeshtasticRecibir);
+		}
+
+		if (HANDLEtaskMeshtasticMandarTelemetriaYnodeID != NULL) {
+			vTaskSuspend(HANDLEtaskMeshtasticMandarTelemetriaYnodeID);
+		}
 	}
 //////////////////////////////////////// 
 
@@ -775,48 +1032,16 @@ SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición
 #endif
 
 
-#if (placaSiendoFlasheada == wistag)
-//////////////////////////////////////// Cosas específicas de la Tag
-	#define BUZZER 21
-	#define BUTTON 9
-
-	volatile bool botonPulsado = false;
-	volatile uint32_t cuandoFuePulsado = 0xFFFFFFFF; // Tiempo máximo 
-
-	constexpr const char* mensajeAlarma = "!ALARMA de ";
-	char mensajeAlarmaConNombre[64];
-
-	void botonHaSidoPulsado(void){
-		if(digitalRead(BUTTON) == LOW){
-			botonPulsado = true;
-			cuandoFuePulsado = millis();
-			//Serial.printf("Boton pulsado\n");
-		}else{
-			if((unsigned)millis() - cuandoFuePulsado >= 3000){	// Se ha pulsado el botón durante más de 3 segundos, eso significa emergencia
-				size_t len1 = strlen(mensajeAlarma);
-    		size_t len2 = strlen(longName);
-				memcpy(mensajeAlarmaConNombre, mensajeAlarma, len1);
-    		memcpy(mensajeAlarmaConNombre + len1, longName, len2 + 1);  // +1 para copiar también '\0'
-				radioMesh.mandarTexto(mensajeAlarmaConNombre, len1 + len2 + 1);
-			}
-		}
-	}
-////////////////////////////////////////
-#endif
-
-
 
 
 void setup(){
 	time_t timeout = millis();
 	Serial.begin(1000000);
 	while (!Serial){
-		if ((millis() - timeout) < 5000){      delay(100);    }
+		if ((millis() - timeout) < 1000){      delay(100);    }
     else														{      break;    			}
 	}
-
-	setupWatchdogTimer();
-
+	
 	/*radioMutex = xSemaphoreCreateMutex();
 	if(radioMutex == NULL){
 		Serial.println("Error creando radioMutex");
@@ -867,17 +1092,22 @@ void setup(){
 	#if mandarMeshtastic
 		radioMesh.mandarNodeID();
 	#endif
-	delay(500);
+
+	setupWatchdogTimer();
+	// Apagado de momento, ya que cuando es pasa a modo "sleep hasta que se pulse el botón" el watchdog sigue contanoo y este no se puede parar una vez se ha iniciado
+
+	delay(250);
 }
 
 
 
 bool LEDencendido = false;
 uint32_t ultimosMilis = 0;
-uint32_t milisON = 500, milisPeriodo = 5000; // 10% duty
+uint32_t milisON = 10, milisPeriodo = 1000; // 10% duty
 
 void loop(){ // Se usa para cambiar el LED (para ver que la placa no haya crasheado) y para alimentar el Watchdog
-	//suspendLoop();
+
+  gestionarEmergenciaSolicitada(); // Por si se ha pulsado el botón durante más de 3 segundos, pasando a un modo de bajo consumo
 
 	// máquina de estados simple
 	if(LEDencendido){
@@ -1166,7 +1396,12 @@ void taskMeshtasticMandarTexto(void *pvParameters) {
 					#endif*/
 
 					if (bufferMeshtasticLength > 0) {
-						radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
+						if (estadoFiltradoActual == ESTADO_CAIDA) {
+							//radioMesh.mandarAlarma(bufferMeshtastic, bufferMeshtasticLength); 	//Las alarmas no se suben a MQTT
+							radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
+						}else{
+							radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
+						}
 
 						ultimoEstadoEnviado = estadoFiltradoActual;
 						primerEstadoEnviado = false;
@@ -1247,6 +1482,23 @@ void taskMeshtasticRecibir(void *pvParameters) {
           memcpy(textoRecibido, texto, textoLen + 1);
           textoRecibidoLength = textoLen;
         }
+
+				if (radioMesh.decodificarSiEsAlarma(msg.data + 16, msg.len - 16, texto, sizeof(texto), &textoLen)) {
+          DPRINT("Recibida Alarma: ");
+          DPRINT(texto);
+
+					// #if usarBluetooth
+					// 	if(g_BleUartConnected){
+					// 		DPRINT("		Mandando por Bluetooth");
+					// 		g_BleUart.println(texto);
+					// 	}
+					// #endif
+
+					DPRINTLN();
+
+          memcpy(textoRecibido, texto, textoLen + 1);
+          textoRecibidoLength = textoLen;
+        }
       }
 			// Se ha recibido un mensaje
 			if (HANDLEtaskAlarmaTagBuzzerYled != NULL) {				xTaskNotifyGive(HANDLEtaskAlarmaTagBuzzerYled);			}
@@ -1282,14 +1534,16 @@ void taskAlarmaTagBuzzerYled(void * pvParameters) {
 					vTaskDelay(pdMS_TO_TICKS(500));
 				}while(!botonPulsado);
 
-				#else
+			#else
+
 					for(int i=0; i<12; i++){
 						digitalWrite(LED_BLUE, HIGH);
 						vTaskDelay(pdMS_TO_TICKS(100));
 						digitalWrite(LED_BLUE, LOW);
 						vTaskDelay(pdMS_TO_TICKS(100));
 					}
-				#endif
+
+			#endif
 
 		}else{
 
@@ -1301,7 +1555,7 @@ void taskAlarmaTagBuzzerYled(void * pvParameters) {
 					tone(BUZZER, 3000);
 					vTaskDelay(pdMS_TO_TICKS(1000));
 				}while(!botonPulsado);
-					noTone(BUZZER);
+				noTone(BUZZER);
 				
 			#else 
 
