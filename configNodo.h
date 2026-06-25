@@ -93,7 +93,7 @@
   constexpr uint16_t 	preamble = 12;
   constexpr uint8_t	 	syncWord = 0x2B;
   constexpr float  		freqMHz  = 866.0;
-  constexpr uint8_t 	sf 			 = 5;
+  constexpr uint8_t 	sf 			 = 7;
   constexpr float 		bw       = 250.0;
   constexpr uint8_t	 	cr 			 = 5;
 
