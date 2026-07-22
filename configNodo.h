@@ -17,6 +17,28 @@
 
 
 
+////////////////////////////////////////Identificacion del nodo en Meshtastic
+
+	#if (placaSiendoFlasheada == wisblock)
+    constexpr uint32_t  nodeNum   = 0x01020304;
+    constexpr char*     longName  = "WisMesh_wisblock_Arduino_1";
+    constexpr char*     shortName = "0304";
+  #elif (placaSiendoFlasheada == wistag)
+    constexpr uint32_t  nodeNum   = 0x01020301;
+    constexpr char*     longName  = "WisMesh_wistag_Arduino_1";
+    constexpr char*     shortName = "0301";
+    //0x01020300;               0x01020301;                   0x010203FF;
+    //"Wistag_Casco_Minero";    "WisMesh_wistag_Arduino_1";   "Wistag_Abierta";
+    //"0300";                   "0301";                       "03FF";
+  #endif
+  constexpr uint8_t   hopLimit  = 7;
+  constexpr bool      wantAck   = false;
+  constexpr bool      viaMqtt   = false;
+
+////////////////////////////////////////
+
+
+
 #define usarBluetooth false
 			#if usarBluetooth	
 			#include <bluefruit.h>
@@ -31,20 +53,22 @@
 
 #define usarAcelerometro true 
 			#if usarAcelerometro
-
-#define printBufferFIFO false
-            // Printea todo lo que se puede leer del buffer. Dejar apagado si no se está usando porque consume mucho tiempo de consumo. Independiente de "mandarSerial"
-            // Si BLuetooth está encendido también se imprimirá por allí
+        #define printBufferFIFO false
+                    // Printea todo lo que se puede leer del buffer. Dejar apagado si no se está usando porque consume mucho tiempo de consumo. Independiente de "printearSerial"
+                    // Si BLuetooth está encendido también se imprimirá por allí
 			#endif
+
+#define simularRedNeuronal true                                 //En simulación no se generarán caídas
+      #define probabilidadCambioEstadoEsUnoEntreEsto 100
 
 #define mandarMeshtastic true
 
 #define mandarTelemetria true
 
 
-#define mandarSerial true
+#define printearSerial true
       ////////////////////////////////////////  Serial.print toggleable
-        #if mandarSerial
+        #if printearSerial
           #define DPRINT(...) Serial.print(__VA_ARGS__)
           #define DPRINTLN(...)  Serial.println(__VA_ARGS__)
           #define DPRINTF(...)    Serial.printf(__VA_ARGS__)
@@ -64,32 +88,9 @@
 
 
 
-
-////////////////////////////////////////Identificacion del nodo en Meshtastic
-
-	#if (placaSiendoFlasheada == wisblock)
-    constexpr uint32_t  nodeNum   = 0x01020304;
-    constexpr char*     longName  = "WisMesh_wisblock_Arduino";
-    constexpr char*     shortName = "0304";
-  #elif (placaSiendoFlasheada == wistag)
-    constexpr uint32_t  nodeNum   = 0x01020300;
-    constexpr char*     longName  = "Wistag_Casco_Minero";
-    constexpr char*     shortName = "0300";
-    //0x01020300;               0x01020301;                   0x010203FF;
-    //"Wistag_Casco_Minero";    "WisMesh_wistag_Arduino_1";   "Wistag_Abierta";
-    //"0300";                   "0301";                       "03FF";
-  #endif
-  constexpr uint8_t   hopLimit  = 7;
-  constexpr bool      wantAck   = false;
-  constexpr bool      viaMqtt   = false;
-
-////////////////////////////////////////
-
-
-
 ////////////////////////////////////////Configuración RadioLib
 
-  constexpr float 		potencia = 22.0;
+  constexpr float 		potencia = -9; // int8_t
   constexpr uint16_t 	preamble = 12;
   constexpr uint8_t	 	syncWord = 0x2B;
   constexpr float  		freqMHz  = 866.0;
@@ -103,13 +104,13 @@
 
 ////////////////////////////////////////Configuración periodos de tareas
 
-  constexpr uint32_t periodoAccel = 20;			//ms de periodicidad
+  constexpr uint32_t periodoAccel = 40;			//ms de periodicidad
 
   constexpr uint32_t periodoMensajePosition = 5*60*1000;		//ms de periodicidad
 
   constexpr uint32_t tiempoMinimoEntreMensajesMeshtastic  = 30*1000;				//ms de periodicidad
 
-  constexpr uint32_t periodoMensajeTelemetriaYnodeID  = 30*60*1000;				//ms de periodicidad
+  constexpr uint32_t periodoMensajeTelemetriaYnodeID  = 20*60*1000;				//ms de periodicidad
 
 ////////////////////////////////////////
 
@@ -118,9 +119,9 @@
   constexpr uint32_t bCMtamano = 8192;    // Debe ser tan grande como para poder guardar 2 segundos de datos a 1600 Hz
 
 			#if (placaSiendoFlasheada == wisblock)
-        constexpr uint32_t freqIMU = 400;	  						//Hz.  Can be: 0,1,10,25,50,100,200,400,1600,5000 Hz
+        constexpr uint32_t freqIMU = 100;	  						//Hz.  Can be: 0,1,10,25,50,100,200,400,1600,5000 Hz
 			#elif (placaSiendoFlasheada == wistag)
-				#define            freqIMU LIS2DH12_ODR_50Hz
+				#define            freqIMU LIS2DH12_ODR_25Hz
           // Can be LIS2DH12_ODR_1Hz, LIS2DH12_ODR_1Hz, LIS2DH12_ODR_10Hz, LIS2DH12_ODR_25Hz, LIS2DH12_ODR_50Hz, LIS2DH12_ODR_100Hz, LIS2DH12_ODR_200Hz, LIS2DH12_ODR_400Hz, LIS2DH12_ODR_1kHz620_LP, LIS2DH12_ODR_5kHz376_LP_1kHz344_NM_HP, 
 			#endif
   

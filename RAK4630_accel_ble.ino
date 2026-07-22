@@ -16,9 +16,7 @@
 
 #if (placaSiendoFlasheada == wisblock)
 	#include "SparkFunLIS3DH.h" //http://librarymanager/All#SparkFun-LIS3DH
-#endif
-
-#if (placaSiendoFlasheada == wistag)
+#elif (placaSiendoFlasheada == wistag)
 	#include "SparkFun_LIS2DH12.h" //http://librarymanager/All#SparkFun_LIS2DH12
 #endif
 
@@ -45,16 +43,11 @@ extern "C" {
 ///////////////////////           Corregir problema de TX a veces crashea      /////////////////////
 ///////////////////////                                                        /////////////////////
 ///////////////////////               parece que está corregido y              /////////////////////
-///////////////////////               hay un watchdog, pero revisar            /////////////////////
+///////////////////////              hay un watchdog, pero revisar             /////////////////////
 ///////////////////////                                                        /////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-
-
-// TODO en caso de emergencia, interesaría pasar a un modo de super bajo consumo en el que el minero pudiese pulsar el botón periodicamente para saber si sigue bien
 
 
 
@@ -98,8 +91,9 @@ uint32_t  textoRecibidoLength = 0;
 
 
 //////////////////////////////////////// Cosas procesado Red neuronal
-	float entradaRedNeuronal[EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE]; // 400*2*3
-	uint32_t pEntradaRed = 0;
+	#if !simularRedNeuronal
+    float entradaRedNeuronal[EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE]; // 400*2*3
+	#endif
 
 	enum EstadoMovimiento {
 		ESTADO_CAMINANDO,
@@ -179,6 +173,32 @@ uint32_t  textoRecibidoLength = 0;
 ///////////////////////////////////////////////////
 
 
+//////////////////////////////////////// Control de alimentación
+	void setupAlimentacionSlots(){
+		#if (placaSiendoFlasheada == wisblock)
+			//GPS (slots A y B)
+			pinMode(WB_IO1, OUTPUT);
+			pinMode(WB_IO2, OUTPUT);
+				digitalWrite(WB_IO1, (usarGPS)? HIGH:LOW);
+				digitalWrite(WB_IO2, (usarGPS)? HIGH:LOW);
+
+			//Acelerometro (slot C)
+			pinMode(WB_IO3, OUTPUT);
+			pinMode(WB_IO4, OUTPUT);
+				digitalWrite(WB_IO3, (usarAcelerometro)? HIGH:LOW);
+				digitalWrite(WB_IO4, (usarAcelerometro)? HIGH:LOW);
+		#endif
+
+		#if (placaSiendoFlasheada == wistag)
+			#define PIN_3V3_EN (34)
+			pinMode(PIN_3V3_EN, OUTPUT);
+				digitalWrite(PIN_3V3_EN, (usarAcelerometro || usarGPS)? HIGH:LOW);
+		#endif
+
+		delay(10);
+	}
+//////////////////////////////////////// 
+
 
 #if (placaSiendoFlasheada == wistag)
 //////////////////////////////////////// Cosas específicas de la Tag. Incluye interrupciones por botón y modo de sleep en cuant se manda un mensaje de emergencia
@@ -252,50 +272,6 @@ uint32_t  textoRecibidoLength = 0;
 		entrarModoBajoConsumoSYSTEM_ONboton();
 	}
 ////////////////////////////////////////
-#endif
-
-
-
-//////////////////////////////////////// Funciones del Watchdog
-	void setupWatchdogTimer(void) {
-			NRF_WDT->CONFIG         = 0x00;     										// Configure WDT to not run when CPU is asleep
-			NRF_WDT->CRV            = periodoWatchdog*32768 + 1;  	// timeout[s] = (CRV-1)/32768
-			NRF_WDT->RREN           = 0x01;     										// Enable the RR[0] reload register
-			NRF_WDT->TASKS_START    = 1;        										// Start WDT   
-	}
-
-	//Feed WDT frencuently enough to avoid WDT trigger
-	void feedWatchdog(void) {
-			NRF_WDT->RR[0] = WDT_RR_RR_Reload;
-	}
-////////////////////////////////////////
-
-
-//////////////////////////////////////// Control de alimentación
-	void setupAlimentacionSlots(){
-		#if (placaSiendoFlasheada == wisblock)
-			//GPS (slots A y B)
-			pinMode(WB_IO1, OUTPUT);
-			pinMode(WB_IO2, OUTPUT);
-				digitalWrite(WB_IO1, (usarGPS)? HIGH:LOW);
-				digitalWrite(WB_IO2, (usarGPS)? HIGH:LOW);
-
-			//Acelerometro (slot C)
-			pinMode(WB_IO3, OUTPUT);
-			pinMode(WB_IO4, OUTPUT);
-				digitalWrite(WB_IO3, (usarAcelerometro)? HIGH:LOW);
-				digitalWrite(WB_IO4, (usarAcelerometro)? HIGH:LOW);
-		#endif
-
-		#if (placaSiendoFlasheada == wistag)
-			#define PIN_3V3_EN (34)
-			pinMode(PIN_3V3_EN, OUTPUT);
-				digitalWrite(PIN_3V3_EN, (usarAcelerometro || usarGPS)? HIGH:LOW);
-		#endif
-
-		delay(10);
-	}
-//////////////////////////////////////// 
 
 
 //////////////////////////////////////// Modo de bajo consumo
@@ -347,6 +323,7 @@ uint32_t  textoRecibidoLength = 0;
 		Wire1.begin();
 		SPI.begin();
 		radio.standby();
+			radio.setOutputPower(22); // int8_t
 		delay(20);
 
 		#if (placaSiendoFlasheada == wisblock)
@@ -404,7 +381,7 @@ uint32_t  textoRecibidoLength = 0;
 					feedWatchdog();
 
 					DPRINTLN("Boton pulsado en modo de bajo consumo");
-					#if mandarSerial
+					#if printearSerial
 						Serial.flush();
 					#endif
 
@@ -421,6 +398,23 @@ uint32_t  textoRecibidoLength = 0;
 				}
 			}
 		}
+	}
+////////////////////////////////////////
+#endif
+
+
+
+//////////////////////////////////////// Funciones del Watchdog
+	void setupWatchdogTimer(void) {
+			NRF_WDT->CONFIG         = 0x00;     										// Configure WDT to not run when CPU is asleep
+			NRF_WDT->CRV            = periodoWatchdog*32768 + 1;  	// timeout[s] = (CRV-1)/32768
+			NRF_WDT->RREN           = 0x01;     										// Enable the RR[0] reload register
+			NRF_WDT->TASKS_START    = 1;        										// Start WDT   
+	}
+
+	//Feed WDT frencuently enough to avoid WDT trigger
+	void feedWatchdog(void) {
+			NRF_WDT->RR[0] = WDT_RR_RR_Reload;
 	}
 ////////////////////////////////////////
 
@@ -754,8 +748,9 @@ uint32_t  textoRecibidoLength = 0;
     Serial.println("IMU started");
     Serial.flush();
 
-    accel.setScale(LIS2DH12_4g);
+    accel.setScale(LIS2DH12_16g);
     accel.setDataRate(freqIMU);
+		accel.setMode(LIS2DH12_HR_12bit);								// Máx resolución
 
 		#endif
 	}
@@ -971,62 +966,92 @@ uint32_t  textoRecibidoLength = 0;
 	}
 ////////////////////////////////////////
 
+
 //////////////////////////////////////// Cosas procesado Red neuronal
 	void prepararArrayRed() {
-		uint32_t inicio = (pEscrituraBCM + bCMtamano - EI_CLASSIFIER_RAW_SAMPLE_COUNT) % bCMtamano;
+		#if !simularRedNeuronal
+			uint32_t inicio = (pEscrituraBCM + bCMtamano - EI_CLASSIFIER_RAW_SAMPLE_COUNT) % bCMtamano;
 
-		for (uint32_t j = 0; j < EI_CLASSIFIER_RAW_SAMPLE_COUNT; j++) {
-			uint32_t idxBuffer = (inicio + j) % bCMtamano;
-			uint32_t idxRed = j * EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME;
+			for (uint32_t j = 0; j < EI_CLASSIFIER_RAW_SAMPLE_COUNT; j++) {
+				uint32_t idxBuffer = (inicio + j) % bCMtamano;
+				uint32_t idxRed = j * EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME;
 
-			entradaRedNeuronal[idxRed + 0] = buffCircularMedidas[idxBuffer][0]; // Acc X
-			entradaRedNeuronal[idxRed + 1] = buffCircularMedidas[idxBuffer][1]; // Acc Y
-			entradaRedNeuronal[idxRed + 2] = buffCircularMedidas[idxBuffer][2]; // Acc Z
-		}
+				entradaRedNeuronal[idxRed + 0] = buffCircularMedidas[idxBuffer][0]; // Acc X
+				entradaRedNeuronal[idxRed + 1] = buffCircularMedidas[idxBuffer][1]; // Acc Y
+				entradaRedNeuronal[idxRed + 2] = buffCircularMedidas[idxBuffer][2]; // Acc Z
+			}
+		#else
+			// No hacer nada
+		#endif
 	}
 
 	static int getSignalDataEntradaRed(size_t offset, size_t length, float *out_ptr) {
-		if ((offset + length) > EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE) {
-			return EIDSP_OUT_OF_MEM;
-		}
+		#if !simularRedNeuronal
+			if ((offset + length) > EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE) {
+				return EIDSP_OUT_OF_MEM;
+			}
 
-		memcpy(out_ptr, entradaRedNeuronal + offset, length * sizeof(float));
-		return EIDSP_OK;
+			memcpy(out_ptr, entradaRedNeuronal + offset, length * sizeof(float));
+			return EIDSP_OK;
+		#else
+			memset(out_ptr, 0, length * sizeof(float));
+			return EIDSP_OK;
+		#endif
 	}
 
 	EstadoMovimiento obtenerEstadoDesdeResultado(const ei_impulse_result_t &result) {
-		float mejorValor = 0.0f;
-		EstadoMovimiento mejorEstado = ESTADO_NO_RECONOCIDO;
+		#if !simularRedNeuronal
+			float mejorValor = 0.0f;
+			EstadoMovimiento mejorEstado = ESTADO_NO_RECONOCIDO;
 
-		for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
-			const char *label = result.classification[i].label;
-			float value = result.classification[i].value;
+			for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
+				const char *label = result.classification[i].label;
+				float value = result.classification[i].value;
 
-			if (value > mejorValor) {
-				if (strcmp(label, "Caminando") == 0) {
-					mejorEstado = ESTADO_CAMINANDO;
-					mejorValor = value;
-				}
-				else if (strcmp(label, "Estacionario") == 0) {
-					mejorEstado = ESTADO_ESTACIONARIO;
-					mejorValor = value;
-				}
-				else if (strcmp(label, "Picando") == 0) {
-					mejorEstado = ESTADO_PICANDO;
-					mejorValor = value;
-				}
-				else if (strcmp(label, "Caidas") == 0 || strcmp(label, "Caida") == 0) {
-					mejorEstado = ESTADO_CAIDA;
-					mejorValor = value;
+				if (value > mejorValor) {
+					if (strcmp(label, "Caminando") == 0) {
+						mejorEstado = ESTADO_CAMINANDO;
+						mejorValor = value;
+					}
+					else if (strcmp(label, "Estacionario") == 0) {
+						mejorEstado = ESTADO_ESTACIONARIO;
+						mejorValor = value;
+					}
+					else if (strcmp(label, "Picando") == 0) {
+						mejorEstado = ESTADO_PICANDO;
+						mejorValor = value;
+					}
+					else if (strcmp(label, "Caidas") == 0 || strcmp(label, "Caida") == 0) {
+						mejorEstado = ESTADO_CAIDA;
+						mejorValor = value;
+					}
 				}
 			}
-		}
 
-		if (mejorValor < UMBRAL_ESTADO_RED_NEURONAL) {
-			return ESTADO_NO_RECONOCIDO;
-		}
+			if (mejorValor < UMBRAL_ESTADO_RED_NEURONAL) {
+				return ESTADO_NO_RECONOCIDO;
+			}
 
-		return mejorEstado;
+			return mejorEstado;
+		#else
+			if(random(probabilidadCambioEstadoEsUnoEntreEsto) == 0){
+				switch(random(4)){
+					case 0:
+            return ESTADO_ESTACIONARIO;
+
+					case 1:
+							return ESTADO_CAMINANDO;
+
+					case 2:
+							return ESTADO_PICANDO;
+
+					case 3:
+							return ESTADO_NO_RECONOCIDO;
+				}
+			}else{
+				return estadoMovimientoGlobal;
+			}
+		#endif
 	}
 ////////////////////////////////////////
 #endif
@@ -1107,7 +1132,9 @@ uint32_t milisON = 10, milisPeriodo = 1000; // 10% duty
 
 void loop(){ // Se usa para cambiar el LED (para ver que la placa no haya crasheado) y para alimentar el Watchdog
 
-  gestionarEmergenciaSolicitada(); // Por si se ha pulsado el botón durante más de 3 segundos, pasando a un modo de bajo consumo
+  #if (placaSiendoFlasheada == wistag)
+		gestionarEmergenciaSolicitada(); // Por si se ha pulsado el botón durante más de 3 segundos, pasando a un modo de bajo consumo
+	#endif
 
 	// máquina de estados simple
 	if(LEDencendido){
@@ -1170,12 +1197,16 @@ void taskProcesado(void * pvParameters) {
 
 			ei_impulse_result_t result = { 0 };
 
-			EI_IMPULSE_ERROR err = run_classifier(&signal, &result, false);
+			#if !simularRedNeuronal
+				EI_IMPULSE_ERROR err = run_classifier(&signal, &result, false);
+			#else
+				EI_IMPULSE_ERROR err = EI_IMPULSE_OK;
+			#endif
 
 			if (err == EI_IMPULSE_OK) {
 				estadoMovimientoGlobal = obtenerEstadoDesdeResultado(result);
 
-				#if mandarSerial
+				#if printearSerial
 					Serial.print("Estado red neuronal: ");
 
 					switch (estadoMovimientoGlobal) {
@@ -1201,17 +1232,19 @@ void taskProcesado(void * pvParameters) {
 							break;
 					}
 
-					for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
-						Serial.print(result.classification[i].label);
-						Serial.print(": ");
-						Serial.println(result.classification[i].value, 4);
-					}
+					#if !simularRedNeuronal
+							for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
+									Serial.print(result.classification[i].label);
+									Serial.print(": ");
+									Serial.println(result.classification[i].value, 4);
+							}
+					#endif
 				#endif
 			}
 			else {
 				estadoMovimientoGlobal = ESTADO_NO_RECONOCIDO;
 
-				#if mandarSerial
+				#if printearSerial
 					Serial.print("Error ejecutando run_classifier: ");
 					Serial.println((int)err);
 				#endif
@@ -1235,8 +1268,8 @@ void taskMeshtasticMandarTexto(void *pvParameters) {
 		uint8_t indiceHistoricoEstados = 0;
 		uint8_t estadosGuardados = 0;
 
-		EstadoMovimiento ultimoEstadoEnviado = ESTADO_NO_RECONOCIDO;
-		EstadoMovimiento estadoFiltradoActual = ESTADO_NO_RECONOCIDO;
+		EstadoMovimiento ultimoEstadoEnviado = ESTADO_ESTACIONARIO;
+		EstadoMovimiento estadoFiltradoActual = ESTADO_ESTACIONARIO;
 
 		bool primerEstadoEnviado = true;
 		uint32_t ultimoMensajeMandadoMs = 0;

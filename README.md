@@ -77,7 +77,7 @@ Esto selecciona qué partes del código se compilan. La `wistag` activa elemento
 #define usarAcelerometro true
 #define mandarMeshtastic true
 #define mandarTelemetria true
-#define mandarSerial true
+#define printearSerial true
 ```
 
 Estos `#define` permiten compilar o excluir partes del sistema. No son simples flags en ejecución: al ser directivas de preprocesador, el código asociado se incluye o se elimina durante la compilación.
