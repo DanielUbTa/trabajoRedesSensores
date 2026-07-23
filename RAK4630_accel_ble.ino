@@ -10,6 +10,7 @@
 #include <nrf.h>				// Para el control de consumo
 #include <nrf_gpio.h>
 
+#include <TFM_inferencing.h>
 
 #include "configNodo.h"
 
@@ -22,7 +23,6 @@
 
 #include "controlRadio.h"
 #include "radioMesh.h"
-#include <Trabajo_inferencing.h>
 
 /*
 extern "C" {
@@ -73,7 +73,6 @@ uint32_t  textoRecibidoLength = 0;
 
 
 
-#if usarAcelerometro
 //////////////////////////////////////// Globales Acelerómetro
 	float buffCircularMedidas[bCMtamano][3];
 	uint32_t pEscrituraBCM = 0;
@@ -92,20 +91,20 @@ uint32_t  textoRecibidoLength = 0;
 
 //////////////////////////////////////// Cosas procesado Red neuronal
 	#if !simularRedNeuronal
-    float entradaRedNeuronal[EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE]; // 400*2*3
+    float entradaRedNeuronal[EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE]; // 25Hz*2s*3ejes
 	#endif
 
 	enum EstadoMovimiento {
-		ESTADO_CAMINANDO,
-		ESTADO_ESTACIONARIO,
-		ESTADO_PICANDO,
 		ESTADO_CAIDA,
+		ESTADO_ESTACIONARIO,
+		ESTADO_LOCOMOCION,
+		ESTADO_TRABAJO,
+		ESTADO_TUMBADO,
 		ESTADO_NO_RECONOCIDO
 	};
 
 	volatile EstadoMovimiento estadoMovimientoGlobal = ESTADO_NO_RECONOCIDO;
 ////////////////////////////////////////
-#endif
 
 
 
@@ -185,14 +184,14 @@ uint32_t  textoRecibidoLength = 0;
 			//Acelerometro (slot C)
 			pinMode(WB_IO3, OUTPUT);
 			pinMode(WB_IO4, OUTPUT);
-				digitalWrite(WB_IO3, (usarAcelerometro)? HIGH:LOW);
-				digitalWrite(WB_IO4, (usarAcelerometro)? HIGH:LOW);
+				digitalWrite(WB_IO3, HIGH);
+				digitalWrite(WB_IO4, HIGH);
 		#endif
 
 		#if (placaSiendoFlasheada == wistag)
 			#define PIN_3V3_EN (34)
 			pinMode(PIN_3V3_EN, OUTPUT);
-				digitalWrite(PIN_3V3_EN, (usarAcelerometro || usarGPS)? HIGH:LOW);
+				digitalWrite(PIN_3V3_EN, HIGH);
 		#endif
 
 		delay(10);
@@ -332,11 +331,11 @@ uint32_t  textoRecibidoLength = 0;
 			digitalWrite(WB_IO2, (usarGPS)? HIGH:LOW);
 
 			//Acelerometro (slot C)
-			digitalWrite(WB_IO3, (usarAcelerometro)? HIGH:LOW);
-			digitalWrite(WB_IO4, (usarAcelerometro)? HIGH:LOW);
+			digitalWrite(WB_IO3, HIGH);
+			digitalWrite(WB_IO4, HIGH);
 		#elif (placaSiendoFlasheada == wistag)
 
-			digitalWrite(PIN_3V3_EN, (usarAcelerometro || usarGPS)? HIGH:LOW);
+			digitalWrite(PIN_3V3_EN, HIGH);
 
 		#endif
 	}
@@ -432,15 +431,13 @@ uint32_t  textoRecibidoLength = 0;
 	SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición del puntero "pLecturaBCM"
 
 	void crearTasks(){
-		#if usarAcelerometro
-			imuBufferMutex = xSemaphoreCreateMutex();
-			if (imuBufferMutex == NULL) {
-				Serial.println("Error creando imuBufferMutex");
-			}
-			xTaskCreate(taskIMU,"TaskIMU",512,NULL,11,&HANDLEtaskIMU);
+		imuBufferMutex = xSemaphoreCreateMutex();
+		if (imuBufferMutex == NULL) {
+			Serial.println("Error creando imuBufferMutex");
+		}
+		xTaskCreate(taskIMU,"TaskIMU",512,NULL,11,&HANDLEtaskIMU);
 
-			xTaskCreate(taskProcesado,"taskProcesado",2048,NULL,1,&HANDLEtaskProcesado);			
-		#endif
+		xTaskCreate(taskProcesado,"taskProcesado",8096,NULL,1,&HANDLEtaskProcesado);
 
 		#if mandarMeshtastic
 			xTaskCreate(taskMeshtasticMandarTexto,"TaskMensajeMeshtastic",2048,NULL,4,&HANDLEtaskMeshtasticMandarTexto);
@@ -687,7 +684,6 @@ uint32_t  textoRecibidoLength = 0;
 #endif
 
 
-#if usarAcelerometro
 //////////////////////////////////////// Funciones IMU
 	void setupAcel(){
 		#if (placaSiendoFlasheada == wisblock)
@@ -696,7 +692,7 @@ uint32_t  textoRecibidoLength = 0;
 		myIMU.settings.adcEnabled = 0;
 		myIMU.settings.tempEnabled = 0;
 		myIMU.settings.accelSampleRate = freqIMU;  //Hz.  Can be: 0,1,10,25,50,100,200,400,1600,5000 Hz
-		myIMU.settings.accelRange = 4;      //Max G force readable.  Can be: 2, 4, 8, 16
+		myIMU.settings.accelRange = 16;      //Max G force readable.  Can be: 2, 4, 8, 16
 		myIMU.settings.xAccelEnabled = 1;
 		myIMU.settings.yAccelEnabled = 1;
 		myIMU.settings.zAccelEnabled = 1;
@@ -928,22 +924,28 @@ uint32_t  textoRecibidoLength = 0;
 			}
 
 		#elif (placaSiendoFlasheada == wistag)		
-		
-			if (xSemaphoreTake(imuBufferMutex, portMAX_DELAY) == pdTRUE) {
 
-				buffCircularMedidas[pEscrituraBCM][0] = accel.getX() * 0.001; // Cambiar a miliGs 
-				buffCircularMedidas[pEscrituraBCM][1] = accel.getY() * 0.001;
-				buffCircularMedidas[pEscrituraBCM][2] = accel.getZ() * 0.001;
+			const float accX = accel.getX() * 0.001f;
+			const float accY = accel.getY() * 0.001f;
+			const float accZ = accel.getZ() * 0.001f;
+
+			if (xSemaphoreTake(imuBufferMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+
+				buffCircularMedidas[pEscrituraBCM][0] = accX;
+				buffCircularMedidas[pEscrituraBCM][1] = accY;
+				buffCircularMedidas[pEscrituraBCM][2] = accZ;
 
 				pEscrituraBCM = (pEscrituraBCM + 1) % bCMtamano;
 
-				if(((pEscrituraBCM + 1) % bCMtamano) == pLecturaBCM) {
-					pLecturaBCM = (pLecturaBCM + 1) % bCMtamano;
+				if (pEscrituraBCM == pLecturaBCM) {
+						pLecturaBCM = (pLecturaBCM + 1) % bCMtamano;
 				}
 
 				xSemaphoreGive(imuBufferMutex);
 			}
-
+			else {
+				Serial.println("ERROR: taskIMU no pudo coger el mutex");
+			}
 		#endif
 	}
 
@@ -1001,60 +1003,62 @@ uint32_t  textoRecibidoLength = 0;
 
 	EstadoMovimiento obtenerEstadoDesdeResultado(const ei_impulse_result_t &result) {
 		#if !simularRedNeuronal
-			float mejorValor = 0.0f;
-			EstadoMovimiento mejorEstado = ESTADO_NO_RECONOCIDO;
 
-			for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
-				const char *label = result.classification[i].label;
-				float value = result.classification[i].value;
+			float mejorValor = -1.0f;
+			const char *mejorEtiqueta = nullptr;
 
-				if (value > mejorValor) {
-					if (strcmp(label, "Caminando") == 0) {
-						mejorEstado = ESTADO_CAMINANDO;
-						mejorValor = value;
-					}
-					else if (strcmp(label, "Estacionario") == 0) {
-						mejorEstado = ESTADO_ESTACIONARIO;
-						mejorValor = value;
-					}
-					else if (strcmp(label, "Picando") == 0) {
-						mejorEstado = ESTADO_PICANDO;
-						mejorValor = value;
-					}
-					else if (strcmp(label, "Caidas") == 0 || strcmp(label, "Caida") == 0) {
-						mejorEstado = ESTADO_CAIDA;
-						mejorValor = value;
-					}
+			for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) { // Buscar el máximo
+				const float valor = result.classification[i].value;
+				if (valor > mejorValor) {
+					mejorValor = valor;
+					mejorEtiqueta = result.classification[i].label;
 				}
 			}
 
-			if (mejorValor < UMBRAL_ESTADO_RED_NEURONAL) {
+			if (mejorEtiqueta == nullptr || mejorValor < UMBRAL_ESTADO_RED_NEURONAL) {
 				return ESTADO_NO_RECONOCIDO;
 			}
 
-			return mejorEstado;
-		#else
-			if(random(probabilidadCambioEstadoEsUnoEntreEsto) == 0){
-				switch(random(4)){
-					case 0:
-            return ESTADO_ESTACIONARIO;
-
-					case 1:
-							return ESTADO_CAMINANDO;
-
-					case 2:
-							return ESTADO_PICANDO;
-
-					case 3:
-							return ESTADO_NO_RECONOCIDO;
-				}
-			}else{
-				return estadoMovimientoGlobal;
+			if (strcmp(mejorEtiqueta, "CAIDA") == 0) {
+				return ESTADO_CAIDA;
 			}
+			if (strcmp(mejorEtiqueta, "ESTACIONARIO") == 0) {
+				return ESTADO_ESTACIONARIO;
+			}
+			if (strcmp(mejorEtiqueta, "LOCOMOCION") == 0) {
+				return ESTADO_LOCOMOCION;
+			}
+			if (strcmp(mejorEtiqueta, "TRABAJO") == 0) {
+				return ESTADO_TRABAJO;
+			}
+			if (strcmp(mejorEtiqueta, "TUMBADO") == 0) {
+				return ESTADO_TUMBADO;
+			}
+
+			return ESTADO_NO_RECONOCIDO;
+
+		#else
+
+			if (random(probabilidadCambioEstadoEsUnoEntreEsto) == 1) {
+				switch (random(5)) {
+					case 0:
+						return ESTADO_ESTACIONARIO;
+					case 1:
+						return ESTADO_LOCOMOCION;
+					case 2:
+						return ESTADO_TRABAJO;
+					case 3:
+						return ESTADO_TUMBADO;
+					case 4:
+					default:
+						return ESTADO_NO_RECONOCIDO;
+				}
+			}
+			return estadoMovimientoGlobal;
+
 		#endif
-	}
+}
 ////////////////////////////////////////
-#endif
 
 
 
@@ -1097,10 +1101,8 @@ void setup(){
 		Serial.println("Error en la inicialización de radioMesh");
 	}
 
-	#if usarAcelerometro
-		Serial.println("Configurando acelerómetro");		Serial.flush();
-		setupAcel();
-	#endif
+	Serial.println("Configurando acelerómetro");		Serial.flush();
+	setupAcel();
 
 	pinMode(LED_GREEN, OUTPUT);
 	pinMode(LED_BLUE, OUTPUT);
@@ -1128,7 +1130,7 @@ void setup(){
 
 bool LEDencendido = false;
 uint32_t ultimosMilis = 0;
-uint32_t milisON = 10, milisPeriodo = 1000; // 10% duty
+uint32_t milisON = 100, milisPeriodo = 1000; // 10% duty
 
 void loop(){ // Se usa para cambiar el LED (para ver que la placa no haya crasheado) y para alimentar el Watchdog
 
@@ -1161,9 +1163,7 @@ void loop(){ // Se usa para cambiar el LED (para ver que la placa no haya crashe
 void taskIMU(void *pvParameters){
   TickType_t lastWakeTime = xTaskGetTickCount();
 	while(true){
-		#if usarAcelerometro
-			leerAcelerometro();
-		#endif
+		leerAcelerometro();
 
 		#if printBufferFIFO
 			printBuffer();
@@ -1174,83 +1174,89 @@ void taskIMU(void *pvParameters){
 }
 
 void taskProcesado(void * pvParameters) {
+	vTaskDelay(pdMS_TO_TICKS(2500)); // Esperar a que haya datos, mínimo necesario es 2 segundos
+
 	TickType_t lastWakeTime = xTaskGetTickCount();
 
-	delay(1000);
-
 	while (true) {
-		#if usarAcelerometro
+		//Serial.println("REd neuronal calculando");
 
-			if (xSemaphoreTake(imuBufferMutex, portMAX_DELAY) == pdTRUE) {
-				prepararArrayRed();
-				xSemaphoreGive(imuBufferMutex);
-			}
-			else {
-				estadoMovimientoGlobal = ESTADO_NO_RECONOCIDO;
-				vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(500));
-				continue;
-			}
+		if (xSemaphoreTake(imuBufferMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+			prepararArrayRed();
+			xSemaphoreGive(imuBufferMutex);
+		}
+		else {
+			Serial.println("ERROR: taskProcesado timeout esperando imuBufferMutex");
 
-			signal_t signal;
-			signal.total_length = EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE;
-			signal.get_data = &getSignalDataEntradaRed;
+			estadoMovimientoGlobal = ESTADO_NO_RECONOCIDO;
+			vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(500));
+			continue;
+		}
+		//Serial.println("Red neuronal sin problemas 1");
 
-			ei_impulse_result_t result = { 0 };
+		signal_t signal;
+		signal.total_length = EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE;
+		signal.get_data = &getSignalDataEntradaRed;
 
-			#if !simularRedNeuronal
-				EI_IMPULSE_ERROR err = run_classifier(&signal, &result, false);
-			#else
-				EI_IMPULSE_ERROR err = EI_IMPULSE_OK;
-			#endif
+		ei_impulse_result_t result = { 0 };
 
-			if (err == EI_IMPULSE_OK) {
-				estadoMovimientoGlobal = obtenerEstadoDesdeResultado(result);
-
-				#if printearSerial
-					Serial.print("Estado red neuronal: ");
-
-					switch (estadoMovimientoGlobal) {
-						case ESTADO_CAMINANDO:
-							Serial.println("caminando");
-							break;
-
-						case ESTADO_ESTACIONARIO:
-							Serial.println("estacionario");
-							break;
-
-						case ESTADO_PICANDO:
-							Serial.println("picando");
-							break;
-
-						case ESTADO_CAIDA:
-							Serial.println("caida");
-							break;
-
-						case ESTADO_NO_RECONOCIDO:
-						default:
-							Serial.println("no reconocido");
-							break;
-					}
-
-					#if !simularRedNeuronal
-							for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
-									Serial.print(result.classification[i].label);
-									Serial.print(": ");
-									Serial.println(result.classification[i].value, 4);
-							}
-					#endif
-				#endif
-			}
-			else {
-				estadoMovimientoGlobal = ESTADO_NO_RECONOCIDO;
-
-				#if printearSerial
-					Serial.print("Error ejecutando run_classifier: ");
-					Serial.println((int)err);
-				#endif
-			}
-
+		#if !simularRedNeuronal
+			EI_IMPULSE_ERROR err = run_classifier(&signal, &result, false);
+		#else
+			EI_IMPULSE_ERROR err = EI_IMPULSE_OK;
 		#endif
+
+		if(err == EI_IMPULSE_OK){
+			//Serial.println("Red neuronal sin problemas 2");
+			estadoMovimientoGlobal = obtenerEstadoDesdeResultado(result);
+
+			#if printearSerial
+				DPRINT("Estado red neuronal: ");
+
+				switch (estadoMovimientoGlobal) {
+					case ESTADO_CAIDA:
+						DPRINTLN("caida");
+						break;
+
+					case ESTADO_ESTACIONARIO:
+						DPRINTLN("estacionario");
+						break;
+
+					case ESTADO_LOCOMOCION:
+						DPRINTLN("locomocion");
+						break;
+
+					case ESTADO_TRABAJO:
+						DPRINTLN("trabajo");
+						break;
+
+					case ESTADO_TUMBADO:
+						DPRINTLN("tumbado");
+						break;
+
+					case ESTADO_NO_RECONOCIDO:
+					default:
+						DPRINTLN("no reconocido");
+						break;
+				}
+
+				#if !simularRedNeuronal
+						for(size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++){
+								DPRINT(result.classification[i].label);
+								DPRINT(": ");
+								DPRINTLN(result.classification[i].value, 4);
+						}
+				#endif
+			#endif
+		}else{
+			DPRINTLN("Red neuronal con problemas 1");
+			estadoMovimientoGlobal = ESTADO_NO_RECONOCIDO;
+
+			#if printearSerial
+				DPRINT("Error ejecutando run_classifier: ");
+				DPRINTLN((int)err);
+			#endif
+		}
 
 		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(500));
 	}
@@ -1259,194 +1265,198 @@ void taskProcesado(void * pvParameters) {
 void taskMeshtasticMandarTexto(void *pvParameters) {
 	TickType_t lastWakeTime = xTaskGetTickCount();
 
-	#if usarAcelerometro
-		constexpr uint8_t N_ESTADOS_FILTRO = 7;
-		constexpr uint8_t MIN_ESTADOS_CAMBIO = 5;
-		constexpr uint8_t MIN_CAIDAS_CAMBIO = 2;
+	constexpr uint8_t N_ESTADOS_FILTRO = 7;
+	constexpr uint8_t MIN_ESTADOS_CAMBIO = 5;
+	constexpr uint8_t MIN_CAIDAS_CAMBIO = 2;
 
-		EstadoMovimiento historicoEstados[N_ESTADOS_FILTRO];
-		uint8_t indiceHistoricoEstados = 0;
-		uint8_t estadosGuardados = 0;
+	EstadoMovimiento historicoEstados[N_ESTADOS_FILTRO];
+	uint8_t indiceHistoricoEstados = 0;
+	uint8_t estadosGuardados = 0;
 
-		EstadoMovimiento ultimoEstadoEnviado = ESTADO_ESTACIONARIO;
-		EstadoMovimiento estadoFiltradoActual = ESTADO_ESTACIONARIO;
+	EstadoMovimiento ultimoEstadoEnviado = ESTADO_ESTACIONARIO;
+	EstadoMovimiento estadoFiltradoActual = ESTADO_ESTACIONARIO;
 
-		bool primerEstadoEnviado = true;
-		uint32_t ultimoMensajeMandadoMs = 0;
-		bool yaSeHaMandadoMensaje = false;
-	#endif
+	bool primerEstadoEnviado = true;
+	uint32_t ultimoMensajeMandadoMs = 0;
+	bool yaSeHaMandadoMensaje = false;
 
 	char bufferString[128];
 
 	while (true) {
-		#if usarAcelerometro
 
-			EstadoMovimiento estadoLeido = estadoMovimientoGlobal;
+		EstadoMovimiento estadoLeido = estadoMovimientoGlobal;
 
-			historicoEstados[indiceHistoricoEstados] = estadoLeido;
-			indiceHistoricoEstados = (indiceHistoricoEstados + 1) % N_ESTADOS_FILTRO;
+		historicoEstados[indiceHistoricoEstados] = estadoLeido;
+		indiceHistoricoEstados = (indiceHistoricoEstados + 1) % N_ESTADOS_FILTRO;
 
-			if (estadosGuardados < N_ESTADOS_FILTRO) {
-				estadosGuardados++;
+		if (estadosGuardados < N_ESTADOS_FILTRO) {
+			estadosGuardados++;
+		}
+
+		uint8_t contadorLocomocion = 0;
+		uint8_t contadorEstacionario = 0;
+		uint8_t contadorTrabajo = 0;
+		uint8_t contadorTumbado = 0;
+		uint8_t contadorCaida = 0;
+		uint8_t contadorNoReconocido = 0;
+
+		for (uint8_t i = 0; i < estadosGuardados; i++) {
+			switch (historicoEstados[i]) {
+				case ESTADO_LOCOMOCION:
+					contadorLocomocion++;
+					break;
+
+				case ESTADO_ESTACIONARIO:
+					contadorEstacionario++;
+					break;
+
+				case ESTADO_TRABAJO:
+					contadorTrabajo++;
+					break;
+
+				case ESTADO_TUMBADO:
+					contadorTumbado++;
+					break;
+
+				case ESTADO_CAIDA:
+					contadorCaida++;
+					break;
+
+				case ESTADO_NO_RECONOCIDO:
+				default:
+					contadorNoReconocido++;
+					break;
+			}
+		}
+
+		EstadoMovimiento nuevoEstadoFiltrado = estadoFiltradoActual;
+		bool hayNuevoEstadoFiltrado = false;
+
+		if (contadorCaida >= MIN_CAIDAS_CAMBIO) {
+			nuevoEstadoFiltrado = ESTADO_CAIDA;
+			hayNuevoEstadoFiltrado = true;
+		}
+		else if (contadorLocomocion >= MIN_ESTADOS_CAMBIO) {
+			nuevoEstadoFiltrado = ESTADO_LOCOMOCION;
+			hayNuevoEstadoFiltrado = true;
+		}
+		else if (contadorTrabajo >= MIN_ESTADOS_CAMBIO) {
+			nuevoEstadoFiltrado = ESTADO_TRABAJO;
+			hayNuevoEstadoFiltrado = true;
+		}
+		else if (contadorTumbado >= MIN_ESTADOS_CAMBIO) {
+			nuevoEstadoFiltrado = ESTADO_TUMBADO;
+			hayNuevoEstadoFiltrado = true;
+		}
+		else if (contadorEstacionario >= MIN_ESTADOS_CAMBIO) {
+			nuevoEstadoFiltrado = ESTADO_ESTACIONARIO;
+			hayNuevoEstadoFiltrado = true;
+		}
+		else if (contadorNoReconocido >= MIN_ESTADOS_CAMBIO) {
+			nuevoEstadoFiltrado = ESTADO_NO_RECONOCIDO;
+			hayNuevoEstadoFiltrado = true;
+		}
+
+		if (hayNuevoEstadoFiltrado) {
+			estadoFiltradoActual = nuevoEstadoFiltrado;
+		}
+
+		bool estadoHaCambiado = primerEstadoEnviado || (estadoFiltradoActual != ultimoEstadoEnviado);
+
+		if (estadoHaCambiado) {
+			const char *estadoTexto = "no reconocido";
+
+			switch (estadoFiltradoActual) {
+				case ESTADO_LOCOMOCION:
+					estadoTexto = "locomocion";
+					break;
+
+				case ESTADO_ESTACIONARIO:
+					estadoTexto = "estacionario";
+					break;
+
+				case ESTADO_TRABAJO:
+					estadoTexto = "trabajo";
+					break;
+
+				case ESTADO_TUMBADO:
+					estadoTexto = "tumbado";
+					break;
+
+				case ESTADO_NO_RECONOCIDO:
+				default:
+					estadoTexto = "no reconocido";
+					break;
 			}
 
-			uint8_t contadorCaminando = 0;
-			uint8_t contadorEstacionario = 0;
-			uint8_t contadorPicando = 0;
-			uint8_t contadorCaida = 0;
-			uint8_t contadorNoReconocido = 0;
+			bool mandarMensaje = false;
 
-			for (uint8_t i = 0; i < estadosGuardados; i++) {
-				switch (historicoEstados[i]) {
-					case ESTADO_CAMINANDO:
-						contadorCaminando++;
-						break;
-
-					case ESTADO_ESTACIONARIO:
-						contadorEstacionario++;
-						break;
-
-					case ESTADO_PICANDO:
-						contadorPicando++;
-						break;
-
-					case ESTADO_CAIDA:
-						contadorCaida++;
-						break;
-
-					case ESTADO_NO_RECONOCIDO:
-					default:
-						contadorNoReconocido++;
-						break;
-				}
+			if (estadoFiltradoActual == ESTADO_CAIDA) {
+				mandarMensaje = true;
 			}
-
-			EstadoMovimiento nuevoEstadoFiltrado = estadoFiltradoActual;
-			bool hayNuevoEstadoFiltrado = false;
-
-			if (contadorCaida >= MIN_CAIDAS_CAMBIO) {
-				nuevoEstadoFiltrado = ESTADO_CAIDA;
-				hayNuevoEstadoFiltrado = true;
-			}
-			else if (contadorCaminando >= MIN_ESTADOS_CAMBIO) {
-				nuevoEstadoFiltrado = ESTADO_CAMINANDO;
-				hayNuevoEstadoFiltrado = true;
-			}
-			else if (contadorEstacionario >= MIN_ESTADOS_CAMBIO) {
-				nuevoEstadoFiltrado = ESTADO_ESTACIONARIO;
-				hayNuevoEstadoFiltrado = true;
-			}
-			else if (contadorPicando >= MIN_ESTADOS_CAMBIO) {
-				nuevoEstadoFiltrado = ESTADO_PICANDO;
-				hayNuevoEstadoFiltrado = true;
-			}
-			else if (contadorNoReconocido >= MIN_ESTADOS_CAMBIO) {
-				nuevoEstadoFiltrado = ESTADO_NO_RECONOCIDO;
-				hayNuevoEstadoFiltrado = true;
-			}
-
-			if (hayNuevoEstadoFiltrado) {
-				estadoFiltradoActual = nuevoEstadoFiltrado;
-			}
-
-			bool estadoHaCambiado = primerEstadoEnviado || (estadoFiltradoActual != ultimoEstadoEnviado);
-
-			if (estadoHaCambiado) {
-				const char *estadoTexto = "no reconocido";
-
-				switch (estadoFiltradoActual) {
-					case ESTADO_CAMINANDO:
-						estadoTexto = "caminando";
-						break;
-
-					case ESTADO_ESTACIONARIO:
-						estadoTexto = "estacionario";
-						break;
-
-					case ESTADO_PICANDO:
-						estadoTexto = "picando";
-						break;
-
-					case ESTADO_CAIDA:
-						estadoTexto = "caida";
-						break;
-
-					case ESTADO_NO_RECONOCIDO:
-					default:
-						estadoTexto = "no reconocido";
-						break;
-				}
-
-				bool mandarMensaje = false;
-
-				if (estadoFiltradoActual == ESTADO_CAIDA) {
+			else {
+				if (!yaSeHaMandadoMensaje || ((uint32_t)(millis() - ultimoMensajeMandadoMs) >= tiempoMinimoEntreMensajesMeshtastic)) {
 					mandarMensaje = true;
 				}
-				else {
-					if (!yaSeHaMandadoMensaje || ((uint32_t)(millis() - ultimoMensajeMandadoMs) >= tiempoMinimoEntreMensajesMeshtastic)) {
-						mandarMensaje = true;
-					}
-				}
-
-				if (mandarMensaje) {
-					memset(bufferString, 0, sizeof(bufferString));
-
-					if (estadoFiltradoActual == ESTADO_CAIDA) {
-						snprintf(
-							bufferString,
-							sizeof(bufferString),
-							"!ALARMA caída detectada de %s",
-							longName
-						);
-					}
-					else {
-						snprintf(
-							bufferString,
-							sizeof(bufferString),
-							"Estado de %s: %s",
-							longName,
-							estadoTexto
-						);
-					}
-
-					bufferString[sizeof(bufferString) - 1] = '\0';
-
-					bufferMeshtasticLength = strlen(bufferString);
-
-					if (bufferMeshtasticLength >= sizeof(bufferMeshtastic)) {
-						bufferMeshtasticLength = sizeof(bufferMeshtastic) - 1;
-					}
-
-					memcpy(bufferMeshtastic, bufferString, bufferMeshtasticLength);
-					bufferMeshtastic[bufferMeshtasticLength] = '\0';
-
-					DPRINTLN(bufferMeshtastic);
-
-					/*#if usarBluetooth
-						if(g_BleUartConnected){
-							g_BleUart.println(bufferMeshtastic);
-						}
-					#endif*/
-
-					if (bufferMeshtasticLength > 0) {
-						if (estadoFiltradoActual == ESTADO_CAIDA) {
-							//radioMesh.mandarAlarma(bufferMeshtastic, bufferMeshtasticLength); 	//Las alarmas no se suben a MQTT
-							radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
-						}else{
-							radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
-						}
-
-						ultimoEstadoEnviado = estadoFiltradoActual;
-						primerEstadoEnviado = false;
-						ultimoMensajeMandadoMs = millis();
-						yaSeHaMandadoMensaje = true;
-					}
-				}
 			}
 
-		#endif
+			if (mandarMensaje) {
+				memset(bufferString, 0, sizeof(bufferString));
 
-		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(250));
+				if (estadoFiltradoActual == ESTADO_CAIDA) {
+					snprintf(
+						bufferString,
+						sizeof(bufferString),
+						"!ALARMA caída detectada de %s",
+						longName
+					);
+				}
+				else {
+					snprintf(
+						bufferString,
+						sizeof(bufferString),
+						"Estado de %s: %s",
+						longName,
+						estadoTexto
+					);
+				}
+
+				bufferString[sizeof(bufferString) - 1] = '\0';
+
+				bufferMeshtasticLength = strlen(bufferString);
+
+				if (bufferMeshtasticLength >= sizeof(bufferMeshtastic)) {
+					bufferMeshtasticLength = sizeof(bufferMeshtastic) - 1;
+				}
+
+				memcpy(bufferMeshtastic, bufferString, bufferMeshtasticLength);
+				bufferMeshtastic[bufferMeshtasticLength] = '\0';
+
+				DPRINTLN(bufferMeshtastic);
+
+				/*#if usarBluetooth
+					if(g_BleUartConnected){
+						g_BleUart.println(bufferMeshtastic);
+					}
+				#endif*/
+
+				if (bufferMeshtasticLength > 0) {
+					if (estadoFiltradoActual == ESTADO_CAIDA) {
+						//radioMesh.mandarAlarma(bufferMeshtastic, bufferMeshtasticLength); 	//Las alarmas no se suben a MQTT
+						radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
+					}else{
+						radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
+					}
+
+					ultimoEstadoEnviado = estadoFiltradoActual;
+					primerEstadoEnviado = false;
+					ultimoMensajeMandadoMs = millis();
+					yaSeHaMandadoMensaje = true;
+				}
+			}
+		}
+
+		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(500));
 	}
 }
 

@@ -24,9 +24,9 @@
     constexpr char*     longName  = "WisMesh_wisblock_Arduino_1";
     constexpr char*     shortName = "0304";
   #elif (placaSiendoFlasheada == wistag)
-    constexpr uint32_t  nodeNum   = 0x01020301;
-    constexpr char*     longName  = "WisMesh_wistag_Arduino_1";
-    constexpr char*     shortName = "0301";
+    constexpr uint32_t  nodeNum   = 0x01020300;
+    constexpr char*     longName  = "Wistag_Casco_Minero";
+    constexpr char*     shortName = "0300";
     //0x01020300;               0x01020301;                   0x010203FF;
     //"Wistag_Casco_Minero";    "WisMesh_wistag_Arduino_1";   "Wistag_Abierta";
     //"0300";                   "0301";                       "03FF";
@@ -58,7 +58,7 @@
                     // Si BLuetooth está encendido también se imprimirá por allí
 			#endif
 
-#define simularRedNeuronal true                                 //En simulación no se generarán caídas
+#define simularRedNeuronal false                                 //En simulación no se generarán caídas
       #define probabilidadCambioEstadoEsUnoEntreEsto 100
 
 #define mandarMeshtastic true
@@ -66,7 +66,7 @@
 #define mandarTelemetria true
 
 
-#define printearSerial true
+#define printearSerial false
       ////////////////////////////////////////  Serial.print toggleable
         #if printearSerial
           #define DPRINT(...) Serial.print(__VA_ARGS__)
@@ -104,22 +104,22 @@
 
 ////////////////////////////////////////Configuración periodos de tareas
 
-  constexpr uint32_t periodoAccel = 40;			//ms de periodicidad
+  constexpr uint32_t periodoAccel = 40;			// ms de periodicidad
 
-  constexpr uint32_t periodoMensajePosition = 5*60*1000;		//ms de periodicidad
+  constexpr uint32_t periodoMensajePosition = 5*60*1000;		// ms de periodicidad
 
-  constexpr uint32_t tiempoMinimoEntreMensajesMeshtastic  = 30*1000;				//ms de periodicidad
+  constexpr uint32_t tiempoMinimoEntreMensajesMeshtastic  = 30*1000;				// ms de periodicidad
 
-  constexpr uint32_t periodoMensajeTelemetriaYnodeID  = 20*60*1000;				//ms de periodicidad
+  constexpr uint32_t periodoMensajeTelemetriaYnodeID  = 20*60*1000;				// ms de periodicidad
 
 ////////////////////////////////////////
 
 
 
-  constexpr uint32_t bCMtamano = 8192;    // Debe ser tan grande como para poder guardar 2 segundos de datos a 1600 Hz
+  constexpr uint32_t bCMtamano = 128;    // Debe ser tan grande como para poder guardar 2 segundos de datos a 25 Hz
 
 			#if (placaSiendoFlasheada == wisblock)
-        constexpr uint32_t freqIMU = 100;	  						//Hz.  Can be: 0,1,10,25,50,100,200,400,1600,5000 Hz
+        constexpr uint32_t freqIMU = 25;	  						// Hz.  Can be: 0,1,10,25,50,100,200,400,1600,5000 Hz
 			#elif (placaSiendoFlasheada == wistag)
 				#define            freqIMU LIS2DH12_ODR_25Hz
           // Can be LIS2DH12_ODR_1Hz, LIS2DH12_ODR_1Hz, LIS2DH12_ODR_10Hz, LIS2DH12_ODR_25Hz, LIS2DH12_ODR_50Hz, LIS2DH12_ODR_100Hz, LIS2DH12_ODR_200Hz, LIS2DH12_ODR_400Hz, LIS2DH12_ODR_1kHz620_LP, LIS2DH12_ODR_5kHz376_LP_1kHz344_NM_HP, 
