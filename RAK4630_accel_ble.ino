@@ -77,6 +77,8 @@ uint32_t  textoRecibidoLength = 0;
 	float buffCircularMedidas[bCMtamano][3];
 	uint32_t pEscrituraBCM = 0;
 	uint32_t pLecturaBCM = 0; // actualizado en "taskMeshtasticMandarTexto"
+
+	float matrizOrientacionSensor[3][3] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
 	
 	#if (placaSiendoFlasheada == wisblock)
 	LIS3DH myIMU(I2C_MODE, 0x18);
@@ -427,6 +429,7 @@ uint32_t  textoRecibidoLength = 0;
 	TaskHandle_t HANDLEtaskAlarmaTagBuzzerYled = NULL;
 	TaskHandle_t HANDLEtaskMeshtasticRecibir = NULL;
 	TaskHandle_t HANDLEtaskMeshtasticMandarTelemetriaYnodeID = NULL;
+	TaskHandle_t HANDLEtaskObtenerInclinacionDelSensor = NULL;
 
 	SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición del puntero "pLecturaBCM"
 
@@ -454,6 +457,10 @@ uint32_t  textoRecibidoLength = 0;
 		xTaskCreate(taskMeshtasticRecibir,"taskMeshtasticRecibir",2048,NULL,6,&HANDLEtaskMeshtasticRecibir); // Puede tener mensajes de alarma, alta prioridad
 
 		xTaskCreate(taskMeshtasticMandarTelemetriaYnodeID,"taskMeshtasticMandarTelemetriaYnodeID",2048,NULL,2,&HANDLEtaskMeshtasticMandarTelemetriaYnodeID);
+
+		#if (placaSiendoFlasheada == wistag)
+			xTaskCreate(taskObtenerInclinacionDelSensor,"taskObtenerInclinacionDelSensor",1024,NULL,1,&HANDLEtaskObtenerInclinacionDelSensor);
+		#endif
 	}
 
 	void suspenderTasksNoNecesariasEmergencia() {
@@ -698,8 +705,8 @@ uint32_t  textoRecibidoLength = 0;
 		myIMU.settings.zAccelEnabled = 1;
 		
 		myIMU.settings.fifoEnabled = 1;
-		myIMU.settings.fifoThreshold = 30;  //Can be 0 to 32
-		myIMU.settings.fifoMode = 1;  //FIFO mode.
+		// myIMU.settings.fifoThreshold = 30;  //Can be 0 to 32
+		// myIMU.settings.fifoMode = 1;  //FIFO mode.
 		//fifoMode can be:
 		//  0 (Bypass mode, FIFO off)
 		//  1 (FIFO mode)
@@ -890,13 +897,25 @@ uint32_t  textoRecibidoLength = 0;
   	#endif			
 	}
 
+	void rotarLecturasSegunInclinacion(float* acc){
+		float salida[3];
+		for (int fila = 0; fila < 3; fila++) {
+			salida[fila] =	matrizOrientacionSensor[fila][0] * acc[0] +
+											matrizOrientacionSensor[fila][1] * acc[1] +
+											matrizOrientacionSensor[fila][2] * acc[2];
+		}
+		for(int i=0; i<3; i++){
+			acc[i] = salida[i];
+		}
+	}
+
 	void leerAcelerometro(){
-		#if (placaSiendoFlasheada == wisblock)
+		#if (placaSiendoFlasheada == wisblock) 	// Para la wisblock no hay rotación de los ejes
 
 			uint8_t fifoStatus = myIMU.fifoGetStatus();
 			uint8_t muestrasFIFO = fifoStatus & 0x1F;
 
-			if(muestrasFIFO == 0) {
+			if(muestrasFIFO == 0 && myIMU.settings.fifoEnabled == 1) {
 				DPRINTLN("---- No hay datos en la FIFO");  //en myIMU.fifoGetStatus() & 0x1F está cuantos datos hay en la fifo, si es 0 no hay nada nuevo
 				//return;
 			}
@@ -908,6 +927,7 @@ uint32_t  textoRecibidoLength = 0;
 
 			if (xSemaphoreTake(imuBufferMutex, portMAX_DELAY) == pdTRUE) {
 				for (char i = 0; i < muestrasFIFO; i++) {
+					
 					buffCircularMedidas[pEscrituraBCM][0] = myIMU.readFloatAccelX();
 					buffCircularMedidas[pEscrituraBCM][1] = myIMU.readFloatAccelY();
 					buffCircularMedidas[pEscrituraBCM][2] = myIMU.readFloatAccelZ();
@@ -925,15 +945,18 @@ uint32_t  textoRecibidoLength = 0;
 
 		#elif (placaSiendoFlasheada == wistag)		
 
-			const float accX = accel.getX() * 0.001f;
-			const float accY = accel.getY() * 0.001f;
-			const float accZ = accel.getZ() * 0.001f;
+			float acc[3];
+			acc[0] = accel.getX() * 0.001f;
+			acc[1] = accel.getY() * 0.001f;
+			acc[2] = accel.getZ() * 0.001f;
+
+			rotarLecturasSegunInclinacion(acc);
 
 			if (xSemaphoreTake(imuBufferMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
 
-				buffCircularMedidas[pEscrituraBCM][0] = accX;
-				buffCircularMedidas[pEscrituraBCM][1] = accY;
-				buffCircularMedidas[pEscrituraBCM][2] = accZ;
+				buffCircularMedidas[pEscrituraBCM][0] = acc[0];
+				buffCircularMedidas[pEscrituraBCM][1] = acc[1];
+				buffCircularMedidas[pEscrituraBCM][2] = acc[2];
 
 				pEscrituraBCM = (pEscrituraBCM + 1) % bCMtamano;
 
@@ -1121,7 +1144,6 @@ void setup(){
 	#endif
 
 	setupWatchdogTimer();
-	// Apagado de momento, ya que cuando es pasa a modo "sleep hasta que se pulse el botón" el watchdog sigue contanoo y este no se puede parar una vez se ha iniciado
 
 	delay(250);
 }
@@ -1162,6 +1184,11 @@ void loop(){ // Se usa para cambiar el LED (para ver que la placa no haya crashe
 
 void taskIMU(void *pvParameters){
   TickType_t lastWakeTime = xTaskGetTickCount();
+	
+	#if (placaSiendoFlasheada == wistag)
+		vTaskDelay(pdMS_TO_TICKS(1500)); // Esperar a que la matriz de rotación esté lista
+	#endif
+
 	while(true){
 		leerAcelerometro();
 
@@ -1171,6 +1198,52 @@ void taskIMU(void *pvParameters){
 
 		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoAccel));
 	}
+}
+
+void taskObtenerInclinacionDelSensor(void *pvParameters){
+  TickType_t lastWakeTime = xTaskGetTickCount();
+	vTaskDelay(pdMS_TO_TICKS(periodoAccel));
+
+	float orientacion[3] = {0.0f, 0.0f, 0.0f};
+
+	// Recoger unos pocos datos
+	for(int i=0; i<32; i++){
+		orientacion[0] += accel.getX() * 0.001f * (1.0f/32.0f);
+		orientacion[1] += accel.getY() * 0.001f * (1.0f/32.0f);
+		orientacion[2] += accel.getZ() * 0.001f * (1.0f/32.0f);
+
+		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoAccel));
+	}
+
+	float module = sqrtf(orientacion[0]*orientacion[0] + orientacion[1]*orientacion[1] + orientacion[2]*orientacion[2]);
+	if(module <= 0.001){
+		Serial.println("Error en el módulo de la orientación");
+		vTaskSuspend(nullptr);
+	}
+
+	orientacion[0] /= module;
+	orientacion[1] /= module;
+	orientacion[2] /= module;
+
+	float anguloZ = atan2f(orientacion[1], -orientacion[0]);
+	float anguloY = atan2f(-orientacion[2], sqrtf(orientacion[0]*orientacion[0] + orientacion[1]*orientacion[1]));
+
+	float cz = cosf(anguloZ), sz = sinf(anguloZ);
+	float cy = cosf(anguloY), sy = sinf(anguloY);
+
+	matrizOrientacionSensor[0][0] =  cy*cz;
+	matrizOrientacionSensor[0][1] = -cy*sz;
+	matrizOrientacionSensor[0][2] =  sy;
+
+	matrizOrientacionSensor[1][0] =  sz;
+	matrizOrientacionSensor[1][1] =  cz;
+	matrizOrientacionSensor[1][2] =  0.0f;
+
+	matrizOrientacionSensor[2][0] = -sy*cz;
+	matrizOrientacionSensor[2][1] =  sy*sz;
+	matrizOrientacionSensor[2][2] =  cy;
+
+	vTaskDelete(nullptr);
 }
 
 void taskProcesado(void * pvParameters) {
@@ -1210,7 +1283,7 @@ void taskProcesado(void * pvParameters) {
 			//Serial.println("Red neuronal sin problemas 2");
 			estadoMovimientoGlobal = obtenerEstadoDesdeResultado(result);
 
-			#if printearSerial
+			#if printearSerial && debugRedNeuronal
 				DPRINT("Estado red neuronal: ");
 
 				switch (estadoMovimientoGlobal) {
@@ -1241,11 +1314,32 @@ void taskProcesado(void * pvParameters) {
 				}
 
 				#if !simularRedNeuronal
-						for(size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++){
-								DPRINT(result.classification[i].label);
-								DPRINT(": ");
-								DPRINTLN(result.classification[i].value, 4);
+					size_t indicesOrdenados[EI_CLASSIFIER_LABEL_COUNT];
+
+					for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
+						indicesOrdenados[i] = i;
+					}
+					for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT - 1; i++) {
+						size_t indiceMayor = i;
+
+						for (size_t j = i + 1; j < EI_CLASSIFIER_LABEL_COUNT; j++) {
+							if (result.classification[indicesOrdenados[j]].value > result.classification[indicesOrdenados[indiceMayor]].value) {
+									indiceMayor = j;
+							}
 						}
+						if (indiceMayor != i) {
+								size_t temporal = indicesOrdenados[i];
+								indicesOrdenados[i] = indicesOrdenados[indiceMayor];
+								indicesOrdenados[indiceMayor] = temporal;
+						}
+						
+					}
+					for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
+							size_t indice = indicesOrdenados[i];
+							DPRINT(result.classification[indice].label);
+							DPRINT(": ");
+							DPRINTLN(result.classification[indice].value, 4);
+					}
 				#endif
 			#endif
 		}else{

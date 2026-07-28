@@ -24,12 +24,12 @@
     constexpr char*     longName  = "WisMesh_wisblock_Arduino_1";
     constexpr char*     shortName = "0304";
   #elif (placaSiendoFlasheada == wistag)
-    constexpr uint32_t  nodeNum   = 0x01020300;
-    constexpr char*     longName  = "Wistag_Casco_Minero";
-    constexpr char*     shortName = "0300";
-    //0x01020300;               0x01020301;                   0x010203FF;
-    //"Wistag_Casco_Minero";    "WisMesh_wistag_Arduino_1";   "Wistag_Abierta";
-    //"0300";                   "0301";                       "03FF";
+    constexpr uint32_t  nodeNum   = 0x01020301;
+    constexpr char*     longName  = "Wistag_Pecho";
+    constexpr char*     shortName = "0301";
+    //0x01020300;               0x01020301;       0x010203FF;
+    //"Wistag_Casco_Minero";    "Wistag_Pecho";   "Wistag_Abierta";
+    //"0300";                   "0301";           "03FF";
   #endif
   constexpr uint8_t   hopLimit  = 7;
   constexpr bool      wantAck   = false;
@@ -58,15 +58,21 @@
                     // Si BLuetooth está encendido también se imprimirá por allí
 			#endif
 
+
+
+#define debugRedNeuronal true
+
 #define simularRedNeuronal false                                 //En simulación no se generarán caídas
       #define probabilidadCambioEstadoEsUnoEntreEsto 100
+
+
 
 #define mandarMeshtastic true
 
 #define mandarTelemetria true
 
 
-#define printearSerial false
+#define printearSerial true
       ////////////////////////////////////////  Serial.print toggleable
         #if printearSerial
           #define DPRINT(...) Serial.print(__VA_ARGS__)
@@ -104,7 +110,7 @@
 
 ////////////////////////////////////////Configuración periodos de tareas
 
-  constexpr uint32_t periodoAccel = 40;			// ms de periodicidad
+  constexpr uint32_t periodoAccel = 160;			// ms de periodicidad
 
   constexpr uint32_t periodoMensajePosition = 5*60*1000;		// ms de periodicidad
 
@@ -125,6 +131,6 @@
           // Can be LIS2DH12_ODR_1Hz, LIS2DH12_ODR_1Hz, LIS2DH12_ODR_10Hz, LIS2DH12_ODR_25Hz, LIS2DH12_ODR_50Hz, LIS2DH12_ODR_100Hz, LIS2DH12_ODR_200Hz, LIS2DH12_ODR_400Hz, LIS2DH12_ODR_1kHz620_LP, LIS2DH12_ODR_5kHz376_LP_1kHz344_NM_HP, 
 			#endif
   
-	constexpr float UMBRAL_ESTADO_RED_NEURONAL = 0.80f;
+	constexpr float UMBRAL_ESTADO_RED_NEURONAL = 0.60f;
 
   constexpr uint32_t milisMinEstadoRedNeuronal = 60*1000;
