@@ -1183,11 +1183,12 @@ void loop(){ // Se usa para cambiar el LED (para ver que la placa no haya crashe
 
 
 void taskIMU(void *pvParameters){
-  TickType_t lastWakeTime = xTaskGetTickCount();
 	
 	#if (placaSiendoFlasheada == wistag)
 		vTaskDelay(pdMS_TO_TICKS(1500)); // Esperar a que la matriz de rotación esté lista
 	#endif
+
+  TickType_t lastWakeTime = xTaskGetTickCount();
 
 	while(true){
 		leerAcelerometro();
@@ -1201,8 +1202,10 @@ void taskIMU(void *pvParameters){
 }
 
 void taskObtenerInclinacionDelSensor(void *pvParameters){
-  TickType_t lastWakeTime = xTaskGetTickCount();
+	
 	vTaskDelay(pdMS_TO_TICKS(periodoAccel));
+
+  TickType_t lastWakeTime = xTaskGetTickCount();
 
 	float orientacion[3] = {0.0f, 0.0f, 0.0f};
 
@@ -1242,6 +1245,8 @@ void taskObtenerInclinacionDelSensor(void *pvParameters){
 	matrizOrientacionSensor[2][0] = -sy*cz;
 	matrizOrientacionSensor[2][1] =  sy*sz;
 	matrizOrientacionSensor[2][2] =  cy;
+
+	Serial.println("Matriz de rotacion calculada");
 
 	vTaskDelete(nullptr);
 }
@@ -1332,7 +1337,7 @@ void taskProcesado(void * pvParameters) {
 								indicesOrdenados[i] = indicesOrdenados[indiceMayor];
 								indicesOrdenados[indiceMayor] = temporal;
 						}
-						
+
 					}
 					for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
 							size_t indice = indicesOrdenados[i];
@@ -1541,6 +1546,11 @@ void taskMeshtasticMandarTexto(void *pvParameters) {
 					}else{
 						radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
 					}
+
+					vTaskDelay(pdMS_TO_TICKS(500));
+
+					uint8_t bufferBinario[] = {0,1,2,3,4};
+					radioMesh.mandarBinario(bufferBinario,5);
 
 					ultimoEstadoEnviado = estadoFiltradoActual;
 					primerEstadoEnviado = false;

@@ -53,14 +53,14 @@
 
 #define usarAcelerometro true 
 			#if usarAcelerometro
-        #define printBufferFIFO false
+        #define printBufferFIFO true
                     // Printea todo lo que se puede leer del buffer. Dejar apagado si no se está usando porque consume mucho tiempo de consumo. Independiente de "printearSerial"
                     // Si BLuetooth está encendido también se imprimirá por allí
 			#endif
 
 
 
-#define debugRedNeuronal true
+#define debugRedNeuronal false
 
 #define simularRedNeuronal false                                 //En simulación no se generarán caídas
       #define probabilidadCambioEstadoEsUnoEntreEsto 100
