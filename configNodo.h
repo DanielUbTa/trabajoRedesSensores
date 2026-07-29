@@ -25,8 +25,8 @@
     constexpr char*     shortName = "0304";
   #elif (placaSiendoFlasheada == wistag)
     constexpr uint32_t  nodeNum   = 0x01020301;
-    constexpr char*     longName  = "Wistag_Pecho";
-    constexpr char*     shortName = "0301";
+    char*               longName  = "Wistag_Pecho";
+    char*               shortName = "0301";
     //0x01020300;               0x01020301;       0x010203FF;
     //"Wistag_Casco_Minero";    "Wistag_Pecho";   "Wistag_Abierta";
     //"0300";                   "0301";           "03FF";
@@ -53,14 +53,14 @@
 
 #define usarAcelerometro true 
 			#if usarAcelerometro
-        #define printBufferFIFO true
+        #define printBufferFIFO false
                     // Printea todo lo que se puede leer del buffer. Dejar apagado si no se está usando porque consume mucho tiempo de consumo. Independiente de "printearSerial"
                     // Si BLuetooth está encendido también se imprimirá por allí
 			#endif
 
 
 
-#define debugRedNeuronal false
+#define debugRedNeuronal true
 
 #define simularRedNeuronal false                                 //En simulación no se generarán caídas
       #define probabilidadCambioEstadoEsUnoEntreEsto 100

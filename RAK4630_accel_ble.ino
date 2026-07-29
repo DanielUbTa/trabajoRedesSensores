@@ -993,6 +993,9 @@ uint32_t  textoRecibidoLength = 0;
 
 
 //////////////////////////////////////// Cosas procesado Red neuronal
+	
+	uint8_t valuesRedNeuronal[5]; // Lo que contendrá todos los resultados
+	
 	void prepararArrayRed() {
 		#if !simularRedNeuronal
 			uint32_t inicio = (pEscrituraBCM + bCMtamano - EI_CLASSIFIER_RAW_SAMPLE_COUNT) % bCMtamano;
@@ -1031,6 +1034,9 @@ uint32_t  textoRecibidoLength = 0;
 			const char *mejorEtiqueta = nullptr;
 
 			for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) { // Buscar el máximo
+
+				valuesRedNeuronal[i] = (uint8_t)(255.0 * result.classification[i].value); // Guardar todos los valores en una global para que puedan acceder otras variables
+				
 				const float valor = result.classification[i].value;
 				if (valor > mejorValor) {
 					mejorValor = valor;
@@ -1431,34 +1437,35 @@ void taskMeshtasticMandarTexto(void *pvParameters) {
 		EstadoMovimiento nuevoEstadoFiltrado = estadoFiltradoActual;
 		bool hayNuevoEstadoFiltrado = false;
 
-		if (contadorCaida >= MIN_CAIDAS_CAMBIO) {
-			nuevoEstadoFiltrado = ESTADO_CAIDA;
-			hayNuevoEstadoFiltrado = true;
-		}
-		else if (contadorLocomocion >= MIN_ESTADOS_CAMBIO) {
-			nuevoEstadoFiltrado = ESTADO_LOCOMOCION;
-			hayNuevoEstadoFiltrado = true;
-		}
-		else if (contadorTrabajo >= MIN_ESTADOS_CAMBIO) {
-			nuevoEstadoFiltrado = ESTADO_TRABAJO;
-			hayNuevoEstadoFiltrado = true;
-		}
-		else if (contadorTumbado >= MIN_ESTADOS_CAMBIO) {
-			nuevoEstadoFiltrado = ESTADO_TUMBADO;
-			hayNuevoEstadoFiltrado = true;
-		}
-		else if (contadorEstacionario >= MIN_ESTADOS_CAMBIO) {
-			nuevoEstadoFiltrado = ESTADO_ESTACIONARIO;
-			hayNuevoEstadoFiltrado = true;
-		}
-		else if (contadorNoReconocido >= MIN_ESTADOS_CAMBIO) {
-			nuevoEstadoFiltrado = ESTADO_NO_RECONOCIDO;
-			hayNuevoEstadoFiltrado = true;
-		}
+		// Contar estados
+			if (contadorCaida >= MIN_CAIDAS_CAMBIO) {
+				nuevoEstadoFiltrado = ESTADO_CAIDA;
+				hayNuevoEstadoFiltrado = true;
+			}
+			else if (contadorLocomocion >= MIN_ESTADOS_CAMBIO) {
+				nuevoEstadoFiltrado = ESTADO_LOCOMOCION;
+				hayNuevoEstadoFiltrado = true;
+			}
+			else if (contadorTrabajo >= MIN_ESTADOS_CAMBIO) {
+				nuevoEstadoFiltrado = ESTADO_TRABAJO;
+				hayNuevoEstadoFiltrado = true;
+			}
+			else if (contadorTumbado >= MIN_ESTADOS_CAMBIO) {
+				nuevoEstadoFiltrado = ESTADO_TUMBADO;
+				hayNuevoEstadoFiltrado = true;
+			}
+			else if (contadorEstacionario >= MIN_ESTADOS_CAMBIO) {
+				nuevoEstadoFiltrado = ESTADO_ESTACIONARIO;
+				hayNuevoEstadoFiltrado = true;
+			}
+			else if (contadorNoReconocido >= MIN_ESTADOS_CAMBIO) {
+				nuevoEstadoFiltrado = ESTADO_NO_RECONOCIDO;
+				hayNuevoEstadoFiltrado = true;
+			}
 
-		if (hayNuevoEstadoFiltrado) {
-			estadoFiltradoActual = nuevoEstadoFiltrado;
-		}
+			if (hayNuevoEstadoFiltrado) {
+				estadoFiltradoActual = nuevoEstadoFiltrado;
+			}
 
 		bool estadoHaCambiado = primerEstadoEnviado || (estadoFiltradoActual != ultimoEstadoEnviado);
 
@@ -1509,8 +1516,7 @@ void taskMeshtasticMandarTexto(void *pvParameters) {
 						"!ALARMA caída detectada de %s",
 						longName
 					);
-				}
-				else {
+				}	else {
 					snprintf(
 						bufferString,
 						sizeof(bufferString),
@@ -1549,7 +1555,10 @@ void taskMeshtasticMandarTexto(void *pvParameters) {
 
 					vTaskDelay(pdMS_TO_TICKS(500));
 
-					uint8_t bufferBinario[] = {0,1,2,3,4};
+					uint8_t bufferBinario[5];
+					for(int i=0; i<5; i++){
+						bufferBinario[i] = valuesRedNeuronal[i];
+					}
 					radioMesh.mandarBinario(bufferBinario,5);
 
 					ultimoEstadoEnviado = estadoFiltradoActual;
