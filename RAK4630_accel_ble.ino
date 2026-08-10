@@ -1,3 +1,5 @@
+#include <TFM_inferencing.h>
+
 #include <Arduino.h>
 #include <Wire.h>
 #include <SPI.h>
@@ -9,8 +11,6 @@
 
 #include <nrf.h>				// Para el control de consumo
 #include <nrf_gpio.h>
-
-#include <TFM_inferencing.h>
 
 #include "configNodo.h"
 
@@ -76,7 +76,7 @@ uint32_t  textoRecibidoLength = 0;
 //////////////////////////////////////// Globales Acelerómetro
 	float buffCircularMedidas[bCMtamano][3];
 	uint32_t pEscrituraBCM = 0;
-	uint32_t pLecturaBCM = 0; // actualizado en "taskMeshtasticMandarTexto"
+	uint32_t pLecturaBCM = 0; // actualizado en "taskMeshtasticMandarEstado"
 
 	float matrizOrientacionSensor[3][3] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
 	
@@ -423,7 +423,7 @@ uint32_t  textoRecibidoLength = 0;
 //////////////////////////////////////// Tasks de FreeRTOS
 	TaskHandle_t HANDLEtaskIMU = NULL;
 	TaskHandle_t HANDLEtaskProcesado = NULL;
-	TaskHandle_t HANDLEtaskMeshtasticMandarTexto = NULL;
+	TaskHandle_t HANDLEtaskMeshtasticMandarEstado = NULL;
 	TaskHandle_t HANDLEtaskMeshtasticMandarGPS = NULL;
 	TaskHandle_t HANDLEtaskLeerGPS = NULL;
 	TaskHandle_t HANDLEtaskAlarmaTagBuzzerYled = NULL;
@@ -443,7 +443,7 @@ uint32_t  textoRecibidoLength = 0;
 		xTaskCreate(taskProcesado,"taskProcesado",8096,NULL,1,&HANDLEtaskProcesado);
 
 		#if mandarMeshtastic
-			xTaskCreate(taskMeshtasticMandarTexto,"TaskMensajeMeshtastic",2048,NULL,4,&HANDLEtaskMeshtasticMandarTexto);
+			xTaskCreate(taskMeshtasticMandarEstado,"TaskMensajeMeshtastic",2048,NULL,4,&HANDLEtaskMeshtasticMandarEstado);
 		#endif
 
 		#if (mandarMeshtastic && usarGPS)
@@ -472,8 +472,8 @@ uint32_t  textoRecibidoLength = 0;
 			vTaskSuspend(HANDLEtaskProcesado);
 		}
 
-		if (HANDLEtaskMeshtasticMandarTexto != NULL) {
-			vTaskSuspend(HANDLEtaskMeshtasticMandarTexto);
+		if (HANDLEtaskMeshtasticMandarEstado != NULL) {
+			vTaskSuspend(HANDLEtaskMeshtasticMandarEstado);
 		}
 
 		if (HANDLEtaskMeshtasticMandarGPS != NULL) {
@@ -1048,8 +1048,8 @@ uint32_t  textoRecibidoLength = 0;
 				return ESTADO_NO_RECONOCIDO;
 			}
 
-			if (strcmp(mejorEtiqueta, "CAIDA") == 0) {
-				return ESTADO_CAIDA;
+			if (strcmp(mejorEtiqueta, "ESTACIONARIO") == 0 || strcmp(mejorEtiqueta, "ESACIONARIO") == 0) { // En el Edge Impulse lo he escrito mal en la segunda versión
+					return ESTADO_ESTACIONARIO;
 			}
 			if (strcmp(mejorEtiqueta, "ESTACIONARIO") == 0) {
 				return ESTADO_ESTACIONARIO;
@@ -1216,10 +1216,10 @@ void taskObtenerInclinacionDelSensor(void *pvParameters){
 	float orientacion[3] = {0.0f, 0.0f, 0.0f};
 
 	// Recoger unos pocos datos
-	for(int i=0; i<32; i++){
-		orientacion[0] += accel.getX() * 0.001f * (1.0f/32.0f);
-		orientacion[1] += accel.getY() * 0.001f * (1.0f/32.0f);
-		orientacion[2] += accel.getZ() * 0.001f * (1.0f/32.0f);
+	for(int i=0; i<8; i++){
+		orientacion[0] += accel.getX() * 0.001f;
+		orientacion[1] += accel.getY() * 0.001f; // Luego se corrige el módulo, no hace falta controlar la magnitud de la orientación media
+		orientacion[2] += accel.getZ() * 0.001f;
 
 		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoAccel));
 	}
@@ -1367,7 +1367,7 @@ void taskProcesado(void * pvParameters) {
 	}
 }
 
-void taskMeshtasticMandarTexto(void *pvParameters) {
+void taskMeshtasticMandarEstado(void *pvParameters) {
 	TickType_t lastWakeTime = xTaskGetTickCount();
 
 	constexpr uint8_t N_ESTADOS_FILTRO = 7;
@@ -1383,6 +1383,7 @@ void taskMeshtasticMandarTexto(void *pvParameters) {
 
 	bool primerEstadoEnviado = true;
 	uint32_t ultimoMensajeMandadoMs = 0;
+	uint32_t ultimoMensajeBinarioMandadoMs = 0;
 	bool yaSeHaMandadoMensaje = false;
 
 	char bufferString[128];
@@ -1469,7 +1470,7 @@ void taskMeshtasticMandarTexto(void *pvParameters) {
 
 		bool estadoHaCambiado = primerEstadoEnviado || (estadoFiltradoActual != ultimoEstadoEnviado);
 
-		if (estadoHaCambiado) {
+		if (estadoHaCambiado) { // Mandado de mensaje de texto con el estado
 			const char *estadoTexto = "no reconocido";
 
 			switch (estadoFiltradoActual) {
@@ -1520,8 +1521,7 @@ void taskMeshtasticMandarTexto(void *pvParameters) {
 					snprintf(
 						bufferString,
 						sizeof(bufferString),
-						"Estado de %s: %s",
-						longName,
+						"Est: %s",
 						estadoTexto
 					);
 				}
@@ -1547,19 +1547,13 @@ void taskMeshtasticMandarTexto(void *pvParameters) {
 
 				if (bufferMeshtasticLength > 0) {
 					if (estadoFiltradoActual == ESTADO_CAIDA) {
-						//radioMesh.mandarAlarma(bufferMeshtastic, bufferMeshtasticLength); 	//Las alarmas no se suben a MQTT
+						//radioMesh.mandarAlarma(bufferMeshtastic, bufferMeshtasticLength); 	//Las alarmas no se suben por JSON
 						radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
 					}else{
 						radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
 					}
 
-					vTaskDelay(pdMS_TO_TICKS(500));
-
-					uint8_t bufferBinario[5];
-					for(int i=0; i<5; i++){
-						bufferBinario[i] = valuesRedNeuronal[i];
-					}
-					radioMesh.mandarBinario(bufferBinario,5);
+					vTaskDelay(pdMS_TO_TICKS(500)); // Para que no se manden mensajes de texto y binarios demasiado cerca temporalemente
 
 					ultimoEstadoEnviado = estadoFiltradoActual;
 					primerEstadoEnviado = false;
@@ -1567,6 +1561,15 @@ void taskMeshtasticMandarTexto(void *pvParameters) {
 					yaSeHaMandadoMensaje = true;
 				}
 			}
+		}
+
+		if (!yaSeHaMandadoMensaje || ((uint32_t)(millis() - ultimoMensajeBinarioMandadoMs) >= 5000)) {
+			uint8_t bufferBinario[5];
+			for(int i=0; i<5; i++){
+				bufferBinario[i] = valuesRedNeuronal[i];
+			}
+			radioMesh.mandarBinario(bufferBinario,5);
+			ultimoMensajeBinarioMandadoMs = millis();
 		}
 
 		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(500));

@@ -96,7 +96,7 @@
 
 ////////////////////////////////////////Configuración RadioLib
 
-  constexpr float 		potencia = -9; // int8_t
+  constexpr float 		potencia = 0; // int8_t
   constexpr uint16_t 	preamble = 12;
   constexpr uint8_t	 	syncWord = 0x2B;
   constexpr float  		freqMHz  = 866.0;
@@ -114,7 +114,7 @@
 
   constexpr uint32_t periodoMensajePosition = 5*60*1000;		// ms de periodicidad
 
-  constexpr uint32_t tiempoMinimoEntreMensajesMeshtastic  = 30*1000;				// ms de periodicidad
+  constexpr uint32_t tiempoMinimoEntreMensajesMeshtastic  = 40*1000;				// ms de periodicidad
 
   constexpr uint32_t periodoMensajeTelemetriaYnodeID  = 20*60*1000;				// ms de periodicidad
 
