@@ -17,16 +17,28 @@
 
 
 
+
+//////////////////////////////////////// Guardado de datos en la flash
+
+  #define FILENAME    "/config.bin"   // Se guarda un struct de tipo "estructuraDatosGuardados"
+
+////////////////////////////////////////
+
+
+  
+  
+  uint32_t  gatewayNodeNum = 0xb3690d07;
+
 ////////////////////////////////////////Identificacion del nodo en Meshtastic
 
 	#if (placaSiendoFlasheada == wisblock)
     constexpr uint32_t  nodeNum   = 0x01020304;
-    constexpr char*     longName  = "WisMesh_wisblock_Arduino_1";
-    constexpr char*     shortName = "0304";
+    char                longName[36] = "WisMesh_wisblock_Arduino_1";
+    char                shortName[8] = "0304";
   #elif (placaSiendoFlasheada == wistag)
     constexpr uint32_t  nodeNum   = 0x01020301;
-    char*               longName  = "Wistag_Pecho";
-    char*               shortName = "0301";
+    char                longName[36] = "Wistag_Pecho";
+    char                shortName[8] = "0301";
     //0x01020300;               0x01020301;       0x010203FF;
     //"Wistag_Casco_Minero";    "Wistag_Pecho";   "Wistag_Abierta";
     //"0300";                   "0301";           "03FF";
@@ -96,13 +108,13 @@
 
 ////////////////////////////////////////Configuración RadioLib
 
-  constexpr float 		potencia = 0; // int8_t
   constexpr uint16_t 	preamble = 12;
   constexpr uint8_t	 	syncWord = 0x2B;
-  constexpr float  		freqMHz  = 866.0;
-  constexpr uint8_t 	sf 			 = 7;
-  constexpr float 		bw       = 250.0;
-  constexpr uint8_t	 	cr 			 = 5;
+  int8_t              potencia = 0;
+  float               freqMHz  = 866.0;
+  uint8_t             sf 			 = 7;
+  float               bw       = 250.0;
+  uint8_t             cr 			 = 5;
 
 ////////////////////////////////////////
 

@@ -4,6 +4,10 @@
 #include <Wire.h>
 #include <SPI.h>
 
+#include <Adafruit_LittleFS.h>		// Para guardar el nombre, el id de la gateway y la configuración de LoRa
+#include <InternalFileSystem.h>
+using namespace Adafruit_LittleFS_Namespace;
+
 #include <RadioLib.h>
 #include <TinyGPSPlus.h>
 #include <TimeLib.h>   	// Para conversion a tiempo UNIX
@@ -158,6 +162,24 @@ uint32_t  textoRecibidoLength = 0;
 //////////////////////////////////////// 
 #endif
 
+
+
+//////////////////////////////////////// Guardado en la flash. De momento no se ha hecho nada con esto
+	/*File file(InternalFS); 			// Se guarda únicamente un struct de tipo "estructuraDatosGuardados"
+
+	struct estructuraDatosGuardados{
+		char 			longName[36];
+		char 			shortName[8];
+
+		uint32_t  gatewayNodeNum;
+
+		int8_t		potencia;
+		float			freqMHz;
+		uint8_t		sf;
+		float			bw;
+		uint8_t		cr;
+	}*/
+////////////////////////////////////////
 
 
 ////////////////////////////////////////////////////////////
@@ -425,7 +447,6 @@ uint32_t  textoRecibidoLength = 0;
 	TaskHandle_t HANDLEtaskProcesado = NULL;
 	TaskHandle_t HANDLEtaskMeshtasticMandarEstado = NULL;
 	TaskHandle_t HANDLEtaskMeshtasticMandarGPS = NULL;
-	TaskHandle_t HANDLEtaskLeerGPS = NULL;
 	TaskHandle_t HANDLEtaskAlarmaTagBuzzerYled = NULL;
 	TaskHandle_t HANDLEtaskMeshtasticRecibir = NULL;
 	TaskHandle_t HANDLEtaskMeshtasticMandarTelemetriaYnodeID = NULL;
@@ -448,8 +469,6 @@ uint32_t  textoRecibidoLength = 0;
 
 		#if (mandarMeshtastic && usarGPS)
 			xTaskCreate(taskMeshtasticMandarGPS,"TaskMensajeGPS",2048,NULL,3,&HANDLEtaskMeshtasticMandarGPS);
-
-			xTaskCreate(taskLeerGPS,"TaskLeerGPS",2048,NULL,2,&HANDLEtaskLeerGPS);
 		#endif
 
 		xTaskCreate(taskAlarmaTagBuzzerYled,"TaskAlarmaTagBuzzerYled",512,NULL,7,&HANDLEtaskAlarmaTagBuzzerYled); // Puede tener prioridad alta porque ocupa poco tiempo de cómputo y así no se entrecorta el zumbador
@@ -478,10 +497,6 @@ uint32_t  textoRecibidoLength = 0;
 
 		if (HANDLEtaskMeshtasticMandarGPS != NULL) {
 			vTaskSuspend(HANDLEtaskMeshtasticMandarGPS);
-		}
-
-		if (HANDLEtaskLeerGPS != NULL) {
-			vTaskSuspend(HANDLEtaskLeerGPS);
 		}
 
 		if (HANDLEtaskAlarmaTagBuzzerYled != NULL) {
@@ -1049,10 +1064,10 @@ uint32_t  textoRecibidoLength = 0;
 			}
 
 			if (strcmp(mejorEtiqueta, "ESTACIONARIO") == 0 || strcmp(mejorEtiqueta, "ESACIONARIO") == 0) { // En el Edge Impulse lo he escrito mal en la segunda versión
-					return ESTADO_ESTACIONARIO;
-			}
-			if (strcmp(mejorEtiqueta, "ESTACIONARIO") == 0) {
 				return ESTADO_ESTACIONARIO;
+			}
+			if (strcmp(mejorEtiqueta, "CAIDA") == 0) {
+				return ESTADO_CAIDA;
 			}
 			if (strcmp(mejorEtiqueta, "LOCOMOCION") == 0) {
 				return ESTADO_LOCOMOCION;
@@ -1086,9 +1101,61 @@ uint32_t  textoRecibidoLength = 0;
 			return estadoMovimientoGlobal;
 
 		#endif
-}
+	}
 ////////////////////////////////////////
 
+
+//////////////////////////////////////// Guardado en la flash. De momento no se ha hecho nada con esto
+	/*void iniciarMemoriaFlash(){
+		InternalFS.begin();
+
+  	file.open(FILENAME, FILE_O_READ);
+
+		estructuraDatosGuardados configGuardada;
+
+		if(file){	// El archivo ya está generado
+			file.read(configGuardada, sizeof(configGuardada));
+
+			strncpy(longName, configGuardada.longName, sizeof(longName));
+			strncpy(shortName, configGuardada.shortName, sizeof(shortName));
+
+			longName[sizeof(longName) - 1] = '\0';
+			shortName[sizeof(shortName) - 1] = '\0';
+
+			gatewayNodeNum = configGuardada.gatewayNodeNum;
+			potencia = configGuardada.potencia;
+			freqMHz = configGuardada.freqMHz;
+			sf = configGuardada.sf;
+			bw = configGuardada.bw;
+			cr = configGuardada.cr;
+
+		}else{ // Generar un archivo con la configuración default
+			
+			if(file.open(FILENAME, FILE_O_WRITE)){
+				Serial.println("Todavia no habia archivo de configuracion, generando uno nuevo");
+
+				strncpy(configGuardada.longName, longName, sizeof(configGuardada.longName));
+				strncpy(configGuardada.shortName, shortName, sizeof(configGuardada.shortName));
+
+				configGuardada.longName[sizeof(configGuardada.longName) - 1] = '\0';
+				configGuardada.shortName[sizeof(configGuardada.shortName) - 1] = '\0';
+
+				configGuardada.gatewayNodeNum = gatewayNodeNum;
+				configGuardada.potencia = potencia;
+				configGuardada.freqMHz = freqMHz;
+				configGuardada.sf = sf;
+				configGuardada.bw = bw;
+				configGuardada.cr = cr;
+
+				file.write(configDefault, sizeof(estructuraDatosGuardados));
+				file.close();
+			}else{
+				Serial.println("No se pudo generar el archivo");
+			}
+
+		}
+	}*/
+////////////////////////////////////////
 
 
 
@@ -1160,7 +1227,7 @@ bool LEDencendido = false;
 uint32_t ultimosMilis = 0;
 uint32_t milisON = 100, milisPeriodo = 1000; // 10% duty
 
-void loop(){ // Se usa para cambiar el LED (para ver que la placa no haya crasheado) y para alimentar el Watchdog
+void loop(){ // Se usa para cambiar el LED (para ver que la placa no haya crasheado), para alimentar el Watchdog y para parsear la recepción del GPS si hace falta
 
   #if (placaSiendoFlasheada == wistag)
 		gestionarEmergenciaSolicitada(); // Por si se ha pulsado el botón durante más de 3 segundos, pasando a un modo de bajo consumo
@@ -1181,7 +1248,11 @@ void loop(){ // Se usa para cambiar el LED (para ver que la placa no haya crashe
 
 			feedWatchdog();
 		}
-	}	
+	}
+
+	#if usarGPS
+		serializarGPShastaXms(10);
+	#endif
 }
 
 
@@ -1604,15 +1675,6 @@ void taskMeshtasticMandarTelemetriaYnodeID(void *pvParameters){
 			DPRINTF("Mandado mensaje de telemetria. Bateria: %.4f V, %d%%\n",battVoltageMiliVolt*0.001, battPercentage);
 		#endif
 		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoMensajeTelemetriaYnodeID/2));
-	}
-}
-
-void taskLeerGPS(void *pvParameters){
-	while(true){
-		#if usarGPS
-		serializarGPShastaXms(250);
-		#endif
-		vTaskDelay(pdMS_TO_TICKS(4000));
 	}
 }
 
