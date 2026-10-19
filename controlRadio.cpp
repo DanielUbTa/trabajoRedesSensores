@@ -277,6 +277,7 @@ uint32_t ControlRadio::getTxErrorCount() const { return _txErr; }
         Se finaliza la recepción y se vuelve a STATE_REARM_RX
     -- STATE_TX_START : mandar el mensaje del buffer de mensajes a mandar
         Se revisa que haya algún mensaje que mandar, si lo hay se manda
+        Antes de transmitir se realizan hasta 3 CAD (Channel Activity DEtection) esperando entre 10 y 100 ms entre cada reintento
           Si la radio no ha dado problemas se pasa al estado STATE_AWAITING_RADIO, que esperará a que la radio termine de transmitir
           Si la radio ha dado problemas, se pasa a STATE_REARM_RX
 */
@@ -284,119 +285,145 @@ void ControlRadio::taskLoop() {
   for (;;) {
     switch (_state) {
       case STATE_REARM_RX: {
-        _lastError = _radio.startReceive();
+                _lastError = _radio.startReceive();
 
-        if (_lastError == RADIOLIB_ERR_NONE) {
-          _state = STATE_AWAITING_RADIO;
-        } else {
-          _rxErr++;
-          ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(20));
-        }
-        break;
+                if (_lastError == RADIOLIB_ERR_NONE) {
+                  _state = STATE_AWAITING_RADIO;
+                } else {
+                  _rxErr++;
+                  ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(20));
+                }
+                break;
       }
 
       case STATE_AWAITING_RADIO: {
-        bool irqPending = false;
-        bool hasTx = false;
+                bool irqPending = false;
+                bool hasTx = false;
 
-        taskENTER_CRITICAL();
-        if (_irqFlag) {
-          _irqFlag = false;
-          irqPending = true;
-        }
-        hasTx = (_txCount > 0);
-        taskEXIT_CRITICAL();
+                taskENTER_CRITICAL();
+                if (_irqFlag) {
+                  _irqFlag = false;
+                  irqPending = true;
+                }
+                hasTx = (_txCount > 0);
+                taskEXIT_CRITICAL();
 
-        if (irqPending) {
-          if (_txInProgress) { // La operación que la radio estaba realizando era una transmisón
-            _txInProgress = false;
+                if (irqPending) {
+                  if (_txInProgress) { // La operación que la radio estaba realizando era una transmisón
+                    _txInProgress = false;
 
-            if (_lastTxStartState == RADIOLIB_ERR_NONE) {
-              _txOk++;
-            } else {
-              _txErr++;
-            }
+                    if (_lastTxStartState == RADIOLIB_ERR_NONE) {
+                      _txOk++;
+                    } else {
+                      _txErr++;
+                    }
 
-            _radio.finishTransmit();
-            _state = STATE_REARM_RX;
-          } else {
-            _state = STATE_RX_PROCESS;
-          }
-          break;
-        }
+                    _radio.finishTransmit();
+                    _state = STATE_REARM_RX;
+                  } else {
+                    _state = STATE_RX_PROCESS;
+                  }
+                  break;
+                }
 
-        if (hasTx) {
-          _state = STATE_TX_START;
-          break;
-        }
+                if (hasTx) {
+                  _state = STATE_TX_START;
+                  break;
+                }
 
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(50));
-        break;
+                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(50));
+                break;
       }
 
       case STATE_RX_PROCESS: {
-        const size_t len = _radio.getPacketLength();
+                const size_t len = _radio.getPacketLength();
 
-        if ((len == 0U) || (len > MAX_MSG_LEN)) {
-          _lastError = RADIOLIB_ERR_PACKET_TOO_LONG;
-          _rxErr++;
-          _radio.finishReceive();
-          _state = STATE_REARM_RX;
-          break;
-        }
+                if ((len == 0U) || (len > MAX_MSG_LEN)) {
+                  _lastError = RADIOLIB_ERR_PACKET_TOO_LONG;
+                  _rxErr++;
+                  _radio.finishReceive();
+                  _state = STATE_REARM_RX;
+                  break;
+                }
 
-        _lastError = _radio.readData(_radioRxBuffer, len);
+                _lastError = _radio.readData(_radioRxBuffer, len);
 
-        if (_lastError == RADIOLIB_ERR_NONE) {
-          const bool queued = pushRx_(
-            _radioRxBuffer,
-            len,
-            static_cast<int16_t>(_radio.getRSSI()),
-            static_cast<int8_t>(_radio.getSNR())
-          );
+                if (_lastError == RADIOLIB_ERR_NONE) {
+                  const bool queued = pushRx_(
+                    _radioRxBuffer,
+                    len,
+                    static_cast<int16_t>(_radio.getRSSI()),
+                    static_cast<int8_t>(_radio.getSNR())
+                  );
 
-          if (queued) {
-            _rxOk++;
-          } else {
-            _rxErr++;
-          }
-        } else {
-          _rxErr++;
-        }
+                  if (queued) {
+                    _rxOk++;
+                  } else {
+                    _rxErr++;
+                  }
+                } else {
+                  _rxErr++;
+                }
 
-        _radio.finishReceive();
-        _state = STATE_REARM_RX;
-        break;
+                _radio.finishReceive();
+                _state = STATE_REARM_RX;
+                break;
       }
 
       case STATE_TX_START: {
-        Message msg;
+                Message msg;
 
-        if (!popTx_(msg)) {
-          _state = STATE_AWAITING_RADIO;
-          break;
-        }
+                if (!popTx_(msg)) {
+                  _state = STATE_AWAITING_RADIO;
+                  break;
+                }
 
-        _radio.finishReceive(); // Salimos explícitamente de RX antes de transmitir. 
+                _radio.finishReceive(); // Salimos explícitamente de RX antes de transmitir. 
 
-        _lastTxStartState = _radio.startTransmit(msg.data, msg.len);
-        _lastError = _lastTxStartState;
+                /////////////// Comprobación de CAD
+                constexpr uint8_t CAD_INTENTOS = 3;
+                int16_t cadResult = RADIOLIB_LORA_DETECTED;
 
-        if (_lastTxStartState == RADIOLIB_ERR_NONE) {
-          _txInProgress = true;
-          _state = STATE_AWAITING_RADIO;
-        } else {
-          _txInProgress = false;
-          _txErr++;
-          _state = STATE_REARM_RX;
-        }
-        break;
+                for (uint8_t intento = 0; intento < CAD_INTENTOS; intento++) {
+
+                  cadResult = _radio.scanChannel();
+
+                  taskENTER_CRITICAL();
+                  _irqFlag = false;     // Ignorar interrupción generada por el CAD
+                  taskEXIT_CRITICAL();
+
+                  if (cadResult != RADIOLIB_LORA_DETECTED) {
+                    break;
+                  }
+
+                  // CAD falido, esperar un tiempo aleatorio
+                  if (intento < CAD_INTENTOS - 1) {
+                    vTaskDelay(pdMS_TO_TICKS(random(10, 101)));
+                  }
+                }
+
+                _lastTxStartState = (cadResult == RADIOLIB_CHANNEL_FREE) ? _radio.startTransmit(msg.data, msg.len) : cadResult;
+                ///////////////
+
+                // OJO que como haya 3 CAD fallidos el mensaje se perderá completamente
+
+                _lastError = _lastTxStartState;
+
+                if (_lastTxStartState == RADIOLIB_ERR_NONE) {
+                  _txInProgress = true;
+                  _state = STATE_AWAITING_RADIO;
+                } else {
+                  _txInProgress = false;
+                  _txErr++;
+                  _state = STATE_REARM_RX;
+                }
+                break;
       }
 
       default: {
-        _txInProgress = false;
-        _state = STATE_REARM_RX;
-        break;
+                _txInProgress = false;
+                _state = STATE_REARM_RX;
+                break;
       }
     }
   }

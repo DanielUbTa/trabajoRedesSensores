@@ -167,6 +167,8 @@ bool MeshtasticRadio::sendData_(meshtastic_PortNum portnum, const uint8_t* paylo
   meshtastic_Data d = meshtastic_Data_init_zero;
   d.portnum = portnum;
 
+  d.want_response = (portnum == meshtastic_PortNum_TRACEROUTE_APP); // Para la generación de rutas de Next-Hop
+
   if (payloadLen > sizeof(d.payload.bytes)) {
     return false;
 
@@ -394,25 +396,8 @@ bool MeshtasticRadio::pedirRouting(uint32_t toNodeNum,
                                    uint8_t channelIndex, uint8_t nextHop,
                                    int8_t hopLimit, int8_t wantAck)
 {
-  meshtastic_Routing r = meshtastic_Routing_init_zero;
-
-  r.which_variant = meshtastic_Routing_route_request_tag;
-  //r.variant.route_request = meshtastic_RouteDiscovery_init_zero; // Estoi da problemas no se porque
-
-  // Opcional: meter el nodo local como primer salto conocido
-  // r.variant.route_request.route_count = 1;
-  // r.variant.route_request.route[0] = _config.nodeNum;
-
-  uint8_t routingPb[128];
-  size_t routingLen = 0;
-
-  if (!encodePb_(meshtastic_Routing_fields, &r,
-                 routingPb, sizeof(routingPb), routingLen)) {
-    return false;
-  }
-
   return sendData_(meshtastic_PortNum_TRACEROUTE_APP,
-                   routingPb, routingLen,
+                   nullptr, 0,
                    channelIndex, toNodeNum, nextHop, hopLimit, wantAck);
 }
 

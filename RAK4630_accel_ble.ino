@@ -30,11 +30,30 @@ using namespace Adafruit_LittleFS_Namespace;
 
 /*
 extern "C" {
-  #include "nrfx_timer.h"
+	#include "nrfx_timer.h"
 }
 */
 
 
+////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//
+// 				La ocupación de canal por cada end-point está por debajo del 1%
+//
+//
+// 		Para SF = 7, BW = 250.0, CR = 5, estas son las ocupaciones de canal de cada uno de los mensajes que se mandan
+//
+//
+//		Tipo																	Time on air					Periodo														Ocupación del canal
+//
+//		Resultados de la red neuronal 				35.46 ms						5 segundos												0.709 %
+//		Petición Routing 											30.34 ms						10 min														0.005 %
+// 		NodeID 																61.06 ms						20 min														0.005 %
+//		Telemetría	 													48.26 ms						20 min														0.004 %
+//		Cambio de estado											40.58 - 61.06 ms		40 segundos - 5 minutos						0.014 - 0.153 %
+//
+//
+////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
 
@@ -97,7 +116,7 @@ uint32_t  textoRecibidoLength = 0;
 
 //////////////////////////////////////// Cosas procesado Red neuronal
 	#if !simularRedNeuronal
-    float entradaRedNeuronal[EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE]; // 25Hz*2s*3ejes
+		float entradaRedNeuronal[EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE]; // 25Hz*2s*3ejes
 	#endif
 
 	enum EstadoMovimiento {
@@ -245,9 +264,9 @@ uint32_t  textoRecibidoLength = 0;
 				emergenciaSolicitada = true;
 				
 				/*size_t len1 = strlen(mensajeAlarma);
-    		size_t len2 = strlen(longName);
+				size_t len2 = strlen(longName);
 				memcpy(mensajeAlarmaConNombre, mensajeAlarma, len1);
-    		memcpy(mensajeAlarmaConNombre + len1, longName, len2 + 1);  // +1 para copiar también '\0'
+				memcpy(mensajeAlarmaConNombre + len1, longName, len2 + 1);  // +1 para copiar también '\0'
 				radioMesh.mandarTexto(mensajeAlarmaConNombre, len1 + len2 + 1);
 
 				// Pasar a un modo especial de emergencia, en este se pasa a un modo de bajo consumo: 
@@ -277,7 +296,7 @@ uint32_t  textoRecibidoLength = 0;
 		memcpy(mensajeAlarmaConNombre + len1, longName, len2 + 1);
 
 		//radioMesh.mandarAlarma(mensajeAlarmaConNombre, len1 + len2 + 1); 	//Las alarmas no se suben a MQTT
-		radioMesh.mandarTexto(mensajeAlarmaConNombre, len1 + len2 + 1);
+		radioMesh.mandarTexto(mensajeAlarmaConNombre, len1 + len2 + 1,   0,gatewayNodeNum);
 
 		delay(500);
 		feedWatchdog();
@@ -391,14 +410,14 @@ uint32_t  textoRecibidoLength = 0;
 					strcat(mensaje, longName);
 
 					//radioMesh.mandarAlarma(mensaje, strlen(mensaje) + 1); //Las alarmas no se suben a MQTT
-					radioMesh.mandarTexto(mensaje, strlen(mensaje) + 1);
+					radioMesh.mandarTexto(mensaje, strlen(mensaje) + 1,   0,gatewayNodeNum);
 
 					delay(500);
 					feedWatchdog();
 
 					float battVoltageMiliVolt = readVBAT();
 					char battPercentage = mvToPercent(battVoltageMiliVolt);
-					radioMesh.mandarTelemetry(battPercentage, battVoltageMiliVolt*0.001,-1.0,-1.0);
+					radioMesh.mandarTelemetry(battPercentage, battVoltageMiliVolt*0.001,-1.0,-1.0,   0,gatewayNodeNum);
 					
 					delay(500);
 					feedWatchdog();
@@ -446,10 +465,9 @@ uint32_t  textoRecibidoLength = 0;
 	TaskHandle_t HANDLEtaskIMU = NULL;
 	TaskHandle_t HANDLEtaskProcesado = NULL;
 	TaskHandle_t HANDLEtaskMeshtasticMandarEstado = NULL;
-	TaskHandle_t HANDLEtaskMeshtasticMandarGPS = NULL;
+	TaskHandle_t HANDLEtaskMeshtasticMandarPeriodicos = NULL;
 	TaskHandle_t HANDLEtaskAlarmaTagBuzzerYled = NULL;
 	TaskHandle_t HANDLEtaskMeshtasticRecibir = NULL;
-	TaskHandle_t HANDLEtaskMeshtasticMandarTelemetriaYnodeID = NULL;
 	TaskHandle_t HANDLEtaskObtenerInclinacionDelSensor = NULL;
 
 	SemaphoreHandle_t 	imuBufferMutex = NULL; 										// Para bloquear la edición del puntero "pLecturaBCM"
@@ -465,17 +483,12 @@ uint32_t  textoRecibidoLength = 0;
 
 		#if mandarMeshtastic
 			xTaskCreate(taskMeshtasticMandarEstado,"TaskMensajeMeshtastic",2048,NULL,4,&HANDLEtaskMeshtasticMandarEstado);
-		#endif
-
-		#if (mandarMeshtastic && usarGPS)
-			xTaskCreate(taskMeshtasticMandarGPS,"TaskMensajeGPS",2048,NULL,3,&HANDLEtaskMeshtasticMandarGPS);
+			xTaskCreate(taskMeshtasticMandarPeriodicos,"TaskMeshPeriodicos", 2048, NULL, 2,&HANDLEtaskMeshtasticMandarPeriodicos);
 		#endif
 
 		xTaskCreate(taskAlarmaTagBuzzerYled,"TaskAlarmaTagBuzzerYled",512,NULL,7,&HANDLEtaskAlarmaTagBuzzerYled); // Puede tener prioridad alta porque ocupa poco tiempo de cómputo y así no se entrecorta el zumbador
 
 		xTaskCreate(taskMeshtasticRecibir,"taskMeshtasticRecibir",2048,NULL,6,&HANDLEtaskMeshtasticRecibir); // Puede tener mensajes de alarma, alta prioridad
-
-		xTaskCreate(taskMeshtasticMandarTelemetriaYnodeID,"taskMeshtasticMandarTelemetriaYnodeID",2048,NULL,2,&HANDLEtaskMeshtasticMandarTelemetriaYnodeID);
 
 		#if (placaSiendoFlasheada == wistag)
 			xTaskCreate(taskObtenerInclinacionDelSensor,"taskObtenerInclinacionDelSensor",1024,NULL,1,&HANDLEtaskObtenerInclinacionDelSensor);
@@ -495,10 +508,6 @@ uint32_t  textoRecibidoLength = 0;
 			vTaskSuspend(HANDLEtaskMeshtasticMandarEstado);
 		}
 
-		if (HANDLEtaskMeshtasticMandarGPS != NULL) {
-			vTaskSuspend(HANDLEtaskMeshtasticMandarGPS);
-		}
-
 		if (HANDLEtaskAlarmaTagBuzzerYled != NULL) {
 			vTaskSuspend(HANDLEtaskAlarmaTagBuzzerYled);
 		}
@@ -507,8 +516,8 @@ uint32_t  textoRecibidoLength = 0;
 			vTaskSuspend(HANDLEtaskMeshtasticRecibir);
 		}
 
-		if (HANDLEtaskMeshtasticMandarTelemetriaYnodeID != NULL) {
-			vTaskSuspend(HANDLEtaskMeshtasticMandarTelemetriaYnodeID);
+		if (HANDLEtaskMeshtasticMandarPeriodicos != NULL) {
+			vTaskSuspend(HANDLEtaskMeshtasticMandarPeriodicos);
 		}
 	}
 //////////////////////////////////////// 
@@ -519,8 +528,8 @@ uint32_t  textoRecibidoLength = 0;
 			\brief  Inicializa la interfaz SPI, configura la radio SX1262 con los parámetros definidos y deja el módulo en modo recepción
 			\returns devuelve true si la inicialización de la radio se ha realizado correctamente y false si se produce algún error durante la configuración inicial
 		*/
-  bool setupLoRa(){
-    SPI.setPins(45, 43, 44); // Estos pines son iguales para ambas placas
+	bool setupLoRa(){
+		SPI.setPins(45, 43, 44); // Estos pines son iguales para ambas placas
 		SPI.begin();
 
 		/*if(xSemaphoreTake(radioMutex, portMAX_DELAY) != pdTRUE){
@@ -532,8 +541,8 @@ uint32_t  textoRecibidoLength = 0;
 			Serial.println("Error iniciando ControlRadio");
 			return false;
 		}
-    return true;
-  }
+		return true;
+	}
 //////////////////////////////////////// 
 
 
@@ -610,7 +619,7 @@ uint32_t  textoRecibidoLength = 0;
 		// Advertising packet
 		Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
 		Bluefruit.Advertising.addTxPower();
-  	Bluefruit.Advertising.addService(g_BleUart);
+		Bluefruit.Advertising.addService(g_BleUart);
 		Bluefruit.Advertising.addName();
 
 		// Start Advertising
@@ -658,9 +667,9 @@ uint32_t  textoRecibidoLength = 0;
 #if usarGPS
 //////////////////////////////////////// Cosas GPS
 	void beginGPS(){
- 		Serial1.begin(9600);
+		Serial1.begin(9600);
 		while (!Serial1);
-  	Serial.println("Inicialización de GPS ok!");
+		Serial.println("Inicialización de GPS ok!");
 
 		//Serial1.print("$PCAS01,1*1D"); //Configurar baud rate a 9600 baudios
 
@@ -709,7 +718,7 @@ uint32_t  textoRecibidoLength = 0;
 //////////////////////////////////////// Funciones IMU
 	void setupAcel(){
 		#if (placaSiendoFlasheada == wisblock)
-  	Wire.begin();
+		Wire.begin();
 
 		myIMU.settings.adcEnabled = 0;
 		myIMU.settings.tempEnabled = 0;
@@ -757,17 +766,17 @@ uint32_t  textoRecibidoLength = 0;
 		Wire1.setPins(25, 24);
 		Wire1.begin();
 
-    if (accel.begin(0x19, Wire1) == false) {
-      Serial.println("Problem starting LIS2DH12 at 0x19 on Wire1");
-      Serial.flush();
-      return;
-    }
+		if (accel.begin(0x19, Wire1) == false) {
+			Serial.println("Problem starting LIS2DH12 at 0x19 on Wire1");
+			Serial.flush();
+			return;
+		}
 
-    Serial.println("IMU started");
-    Serial.flush();
+		Serial.println("IMU started");
+		Serial.flush();
 
-    accel.setScale(LIS2DH12_16g);
-    accel.setDataRate(freqIMU);
+		accel.setScale(LIS2DH12_16g);
+		accel.setDataRate(freqIMU);
 		accel.setMode(LIS2DH12_HR_12bit);								// Máx resolución
 
 		#endif
@@ -909,7 +918,7 @@ uint32_t  textoRecibidoLength = 0;
 
 			// CTRL_REG3: AOI1 en pin INT1
 			//writeLIS2DH12Register(0x22, 0x40);
-  	#endif			
+		#endif			
 	}
 
 	void rotarLecturasSegunInclinacion(float* acc){
@@ -1109,7 +1118,7 @@ uint32_t  textoRecibidoLength = 0;
 	/*void iniciarMemoriaFlash(){
 		InternalFS.begin();
 
-  	file.open(FILENAME, FILE_O_READ);
+		file.open(FILENAME, FILE_O_READ);
 
 		estructuraDatosGuardados configGuardada;
 
@@ -1164,7 +1173,7 @@ void setup(){
 	Serial.begin(1000000);
 	while (!Serial){
 		if ((millis() - timeout) < 1000){      delay(100);    }
-    else														{      break;    			}
+		else														{      break;    			}
 	}
 	
 	/*radioMutex = xSemaphoreCreateMutex();
@@ -1192,7 +1201,7 @@ void setup(){
 
 	if (!setupLoRa()) {
 		Serial.println("Error iniciando LoRa");
-  }
+	}
 	if(!radioMesh.editarConfig(nodeNum, longName, shortName, hopLimit, wantAck, viaMqtt)) { // Todos estos valores en configNodo.h
 		Serial.println("Error en la inicialización de radioMesh");
 	}
@@ -1213,7 +1222,7 @@ void setup(){
 
 	crearTasks();
 	#if mandarMeshtastic
-		radioMesh.mandarNodeID();
+		radioMesh.mandarNodeID(0,gatewayNodeNum);
 	#endif
 
 	setupWatchdogTimer();
@@ -1229,7 +1238,7 @@ uint32_t milisON = 100, milisPeriodo = 1000; // 10% duty
 
 void loop(){ // Se usa para cambiar el LED (para ver que la placa no haya crasheado), para alimentar el Watchdog y para parsear la recepción del GPS si hace falta
 
-  #if (placaSiendoFlasheada == wistag)
+	#if (placaSiendoFlasheada == wistag)
 		gestionarEmergenciaSolicitada(); // Por si se ha pulsado el botón durante más de 3 segundos, pasando a un modo de bajo consumo
 	#endif
 
@@ -1265,7 +1274,7 @@ void taskIMU(void *pvParameters){
 		vTaskDelay(pdMS_TO_TICKS(1500)); // Esperar a que la matriz de rotación esté lista
 	#endif
 
-  TickType_t lastWakeTime = xTaskGetTickCount();
+	TickType_t lastWakeTime = xTaskGetTickCount();
 
 	while(true){
 		leerAcelerometro();
@@ -1278,11 +1287,11 @@ void taskIMU(void *pvParameters){
 	}
 }
 
-void taskObtenerInclinacionDelSensor(void *pvParameters){
+void taskObtenerInclinacionDelSensor(void *pvParameters){ // Solo se activa una vez al principio
 	
 	vTaskDelay(pdMS_TO_TICKS(periodoAccel));
 
-  TickType_t lastWakeTime = xTaskGetTickCount();
+	TickType_t lastWakeTime = xTaskGetTickCount();
 
 	float orientacion[3] = {0.0f, 0.0f, 0.0f};
 
@@ -1327,6 +1336,8 @@ void taskObtenerInclinacionDelSensor(void *pvParameters){
 
 	vTaskDelete(nullptr);
 }
+
+
 
 void taskProcesado(void * pvParameters) {
 	vTaskDelay(pdMS_TO_TICKS(2500)); // Esperar a que haya datos, mínimo necesario es 2 segundos
@@ -1582,19 +1593,9 @@ void taskMeshtasticMandarEstado(void *pvParameters) {
 				memset(bufferString, 0, sizeof(bufferString));
 
 				if (estadoFiltradoActual == ESTADO_CAIDA) {
-					snprintf(
-						bufferString,
-						sizeof(bufferString),
-						"!ALARMA caída detectada de %s",
-						longName
-					);
+					snprintf(bufferString,sizeof(bufferString),"!ALARMA caída detectada de %s",longName);
 				}	else {
-					snprintf(
-						bufferString,
-						sizeof(bufferString),
-						"Est: %s",
-						estadoTexto
-					);
+					snprintf(bufferString,sizeof(bufferString),"Est: %s",estadoTexto);
 				}
 
 				bufferString[sizeof(bufferString) - 1] = '\0';
@@ -1619,9 +1620,9 @@ void taskMeshtasticMandarEstado(void *pvParameters) {
 				if (bufferMeshtasticLength > 0) {
 					if (estadoFiltradoActual == ESTADO_CAIDA) {
 						//radioMesh.mandarAlarma(bufferMeshtastic, bufferMeshtasticLength); 	//Las alarmas no se suben por JSON
-						radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
+						radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength,   0,gatewayNodeNum);
 					}else{
-						radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength);
+						radioMesh.mandarTexto(bufferMeshtastic, bufferMeshtasticLength,   0,gatewayNodeNum);
 					}
 
 					vTaskDelay(pdMS_TO_TICKS(500)); // Para que no se manden mensajes de texto y binarios demasiado cerca temporalemente
@@ -1639,7 +1640,7 @@ void taskMeshtasticMandarEstado(void *pvParameters) {
 			for(int i=0; i<5; i++){
 				bufferBinario[i] = valuesRedNeuronal[i];
 			}
-			radioMesh.mandarBinario(bufferBinario,5);
+			radioMesh.mandarBinario(bufferBinario,5,   0,gatewayNodeNum);
 			ultimoMensajeBinarioMandadoMs = millis();
 		}
 
@@ -1647,49 +1648,95 @@ void taskMeshtasticMandarEstado(void *pvParameters) {
 	}
 }
 
-void taskMeshtasticMandarGPS(void *pvParameters){
-  TickType_t lastWakeTime = xTaskGetTickCount();
+
+
+
+void taskMeshtasticMandarPeriodicos(void *pvParameters) {
+
+	uint32_t milisDeMandadoDeGPS = millis();
+	uint32_t milisDeMandadoDeTelemetria = millis();
+	uint32_t milisDeMandadoDeNodeID = millis();
+	uint32_t milisDeMandadoDeRouting = millis();
+
 	while(true){
-		#if (mandarMeshtastic && usarGPS)
-		if(posicionValidaGPS()){					
-			radioMesh.mandarPosicion((float)gps.location.lat(), (float)gps.location.lng(), gps.altitude.meters(), gpsUtcEpochOr0());
-		}else{
-			DPRINTLN("GPS no valido");
+
+		bool seHaMandadoAlgo = false;
+
+		// Telemetría
+		#if mandarTelemetria
+		if (millis() - milisDeMandadoDeTelemetria >= periodoMensajeTelemetria) {
+			milisDeMandadoDeTelemetria = millis();
+
+			float battVoltageMiliVolt = readVBAT();
+			uint8_t battPercentage = mvToPercent(battVoltageMiliVolt);
+
+			if (radioMesh.mandarTelemetry(battPercentage, battVoltageMiliVolt*0.001f, -1.0f, -1.0f,   0,gatewayNodeNum)) {
+				seHaMandadoAlgo = true;
+				vTaskDelay(pdMS_TO_TICKS(tiempoEntreMensajesPeriodicos));
+			}
 		}
 		#endif
-		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoMensajePosition));
+
+		// NodeID
+		if (millis() - milisDeMandadoDeNodeID >= periodoMensajeNodeID) {
+			milisDeMandadoDeNodeID = millis();
+
+			if (radioMesh.mandarNodeID(0,gatewayNodeNum)) {
+				seHaMandadoAlgo = true;
+				vTaskDelay(pdMS_TO_TICKS(tiempoEntreMensajesPeriodicos));
+			}
+		}
+
+		// GPS
+		#if usarGPS
+		if (millis() - milisDeMandadoDeGPS >= periodoMensajePosition) {
+			milisDeMandadoDeGPS = millis();
+
+			if (posicionValidaGPS()) {
+				if (radioMesh.mandarPosicion((float)gps.location.lat(),(float)gps.location.lng(),gps.altitude.meters(),gpsUtcEpochOr0(),   0,gatewayNodeNum)) {
+					seHaMandadoAlgo = true;
+					vTaskDelay(pdMS_TO_TICKS(tiempoEntreMensajesPeriodicos));
+				}
+			} else {
+				DPRINTLN("GPS no valido");
+			}
+		}
+		#endif
+
+		// Routing
+		if (millis() - milisDeMandadoDeRouting >= periodoPeticionRouting) {
+			milisDeMandadoDeRouting = millis();
+
+			if (radioMesh.pedirRouting(gatewayNodeNum, 0, 0, -1, 0)) {
+				seHaMandadoAlgo = true;
+				vTaskDelay(pdMS_TO_TICKS(tiempoEntreMensajesPeriodicos));
+			}
+		}
+
+		// No hay mensajes pendientes
+		if (!seHaMandadoAlgo) {
+			vTaskDelay(pdMS_TO_TICKS(20));
+		}
 	}
 }
 
-void taskMeshtasticMandarTelemetriaYnodeID(void *pvParameters){
-  TickType_t lastWakeTime = xTaskGetTickCount();
-	while(true){
-		#if mandarMeshtastic
-			radioMesh.mandarNodeID();
-			vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoMensajeTelemetriaYnodeID/2));
-		#endif
-		#if (mandarMeshtastic && mandarTelemetria)			
-			float battVoltageMiliVolt = readVBAT();
-			char battPercentage = mvToPercent(battVoltageMiliVolt);
-			radioMesh.mandarTelemetry(battPercentage, battVoltageMiliVolt*0.001,-1.0,-1.0);
-			DPRINTF("Mandado mensaje de telemetria. Bateria: %.4f V, %d%%\n",battVoltageMiliVolt*0.001, battPercentage);
-		#endif
-		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoMensajeTelemetriaYnodeID/2));
-	}
-}
+
+
 
 void taskMeshtasticRecibir(void *pvParameters) {
-  while (true) {
-    ControlRadio::Message msg;
+	while (true) {
+		ControlRadio::Message msg;
 
-    if (controlRadio.popRx(msg)) {
-      if (msg.len > 16) {
-        char texto[256];
-        uint32_t textoLen = 0;
+		if (controlRadio.popRx(msg)) {
+			bool notificar = false;
 
-        if (radioMesh.decodificarSiEsTexto(msg.data + 16, msg.len - 16, texto, sizeof(texto), &textoLen)) {
-          DPRINT("Recibido: ");
-          DPRINT(texto);
+			if (msg.len > 16) {
+				char texto[256];
+				uint32_t textoLen = 0;
+
+				if (radioMesh.decodificarSiEsTexto(msg.data + 16, msg.len - 16, texto, sizeof(texto), &textoLen)) {
+					DPRINT("Recibido: ");
+					DPRINT(texto);
 
 					/*#if usarBluetooth
 						if(g_BleUartConnected){
@@ -1700,13 +1747,15 @@ void taskMeshtasticRecibir(void *pvParameters) {
 
 					DPRINTLN();
 
-          memcpy(textoRecibido, texto, textoLen + 1);
-          textoRecibidoLength = textoLen;
-        }
+					memcpy(textoRecibido, texto, textoLen + 1);
+					textoRecibidoLength = textoLen;
+
+					notificar = true;
+				}
 
 				if (radioMesh.decodificarSiEsAlarma(msg.data + 16, msg.len - 16, texto, sizeof(texto), &textoLen)) {
-          DPRINT("Recibida Alarma: ");
-          DPRINT(texto);
+					DPRINT("Recibida Alarma: ");
+					DPRINT(texto);
 
 					// #if usarBluetooth
 					// 	if(g_BleUartConnected){
@@ -1717,16 +1766,18 @@ void taskMeshtasticRecibir(void *pvParameters) {
 
 					DPRINTLN();
 
-          memcpy(textoRecibido, texto, textoLen + 1);
-          textoRecibidoLength = textoLen;
-        }
-      }
-			// Se ha recibido un mensaje
-			if (HANDLEtaskAlarmaTagBuzzerYled != NULL) {				xTaskNotifyGive(HANDLEtaskAlarmaTagBuzzerYled);			}
-    }
+					memcpy(textoRecibido, texto, textoLen + 1);
+					textoRecibidoLength = textoLen;
 
-    vTaskDelay(pdMS_TO_TICKS(50));
-  }
+					notificar = true;
+				}
+			}
+			// Se ha recibido un mensaje y nos importa
+			if (notificar && HANDLEtaskAlarmaTagBuzzerYled != NULL) {				xTaskNotifyGive(HANDLEtaskAlarmaTagBuzzerYled);			}
+		}
+
+		vTaskDelay(pdMS_TO_TICKS(50));
+	}
 }
 
 void taskAlarmaTagBuzzerYled(void * pvParameters) {
