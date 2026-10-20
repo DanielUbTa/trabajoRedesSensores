@@ -1635,7 +1635,7 @@ void taskMeshtasticMandarEstado(void *pvParameters) {
 			}
 		}
 
-		if (!yaSeHaMandadoMensaje || ((uint32_t)(millis() - ultimoMensajeBinarioMandadoMs) >= 5000)) {
+		if (!yaSeHaMandadoMensaje || ((uint32_t)(millis() - ultimoMensajeBinarioMandadoMs) >= tiempoEntreBinariosPrivados)) {
 			uint8_t bufferBinario[5];
 			for(int i=0; i<5; i++){
 				bufferBinario[i] = valuesRedNeuronal[i];
