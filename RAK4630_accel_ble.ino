@@ -410,14 +410,14 @@ uint32_t  textoRecibidoLength = 0;
 					strcat(mensaje, longName);
 
 					//radioMesh.mandarAlarma(mensaje, strlen(mensaje) + 1); //Las alarmas no se suben a MQTT
-					radioMesh.mandarTexto(mensaje, strlen(mensaje) + 1,   0,gatewayNodeNum);
+					radioMesh.mandarTexto(mensaje, strlen(mensaje) + 1);
 
 					delay(500);
 					feedWatchdog();
 
 					float battVoltageMiliVolt = readVBAT();
 					char battPercentage = mvToPercent(battVoltageMiliVolt);
-					radioMesh.mandarTelemetry(battPercentage, battVoltageMiliVolt*0.001,-1.0,-1.0,   0,gatewayNodeNum);
+					radioMesh.mandarTelemetry(battPercentage, battVoltageMiliVolt*0.001,-1.0,-1.0);
 					
 					delay(500);
 					feedWatchdog();
