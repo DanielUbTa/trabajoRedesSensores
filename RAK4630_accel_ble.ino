@@ -1169,6 +1169,9 @@ uint32_t  textoRecibidoLength = 0;
 
 
 void setup(){
+
+	delay(250);
+	
 	time_t timeout = millis();
 	Serial.begin(1000000);
 	while (!Serial){
@@ -1176,6 +1179,8 @@ void setup(){
 		else														{      break;    			}
 	}
 	
+	setupWatchdogTimer();
+
 	/*radioMutex = xSemaphoreCreateMutex();
 	if(radioMutex == NULL){
 		Serial.println("Error creando radioMutex");
@@ -1224,10 +1229,6 @@ void setup(){
 	#if mandarMeshtastic
 		radioMesh.mandarNodeID(0,gatewayNodeNum);
 	#endif
-
-	setupWatchdogTimer();
-
-	delay(250);
 }
 
 
@@ -1297,9 +1298,15 @@ void taskObtenerInclinacionDelSensor(void *pvParameters){ // Solo se activa una 
 
 	// Recoger unos pocos datos
 	for(int i=0; i<8; i++){
-		orientacion[0] += accel.getX() * 0.001f;
-		orientacion[1] += accel.getY() * 0.001f; // Luego se corrige el módulo, no hace falta controlar la magnitud de la orientación media
-		orientacion[2] += accel.getZ() * 0.001f;
+				#if (placaSiendoFlasheada == wisblock)
+							orientacion[0] += myIMU.readFloatAccelX();
+							orientacion[1] += myIMU.readFloatAccelY();		// Luego se corrige el módulo, no hace falta controlar la magnitud de la orientación media
+							orientacion[2] += myIMU.readFloatAccelZ();
+				#elif (placaSiendoFlasheada == wistag)
+							orientacion[0] += accel.getX(); //* 0.001f;
+							orientacion[1] += accel.getY(); //* 0.001f;		// Luego se corrige el módulo, no hace falta controlar la magnitud de la orientación media
+							orientacion[2] += accel.getZ(); //* 0.001f;
+				#endif
 
 		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(periodoAccel));
 	}
@@ -1789,22 +1796,22 @@ void taskAlarmaTagBuzzerYled(void * pvParameters) {
 			botonPulsado = false;	
 		#endif
 
-		if(strstr(textoRecibido, "!ALARMA") == NULL){ // Si en la string recivida no dice "!ALARMA"
-			#if false //(!calladitoEstaMasGuapo) && (placaSiendoFlasheada == wistag)
+		if(  (strstr(textoRecibido, "!ALARMA") == NULL)  &&  (strstr(textoRecibido, "!BOTON") == NULL)){ // Si el mensaje recibido no es de alarma
+			#if (!calladitoEstaMasGuapo) && (placaSiendoFlasheada == wistag)
 				
-				do{
-					tone(BUZZER, 440);
-					vTaskDelay(pdMS_TO_TICKS(300));
-					noTone(BUZZER);
-					vTaskDelay(pdMS_TO_TICKS(50));
-					for(int i=0; i<2; i++){
-						tone(BUZZER, 2000);
-						vTaskDelay(pdMS_TO_TICKS(50));
+					do{
+						tone(BUZZER, 440);
+						vTaskDelay(pdMS_TO_TICKS(300));
 						noTone(BUZZER);
 						vTaskDelay(pdMS_TO_TICKS(50));
-					}
-					vTaskDelay(pdMS_TO_TICKS(500));
-				}while(!botonPulsado);
+						for(int i=0; i<2; i++){
+							tone(BUZZER, 2000);
+							vTaskDelay(pdMS_TO_TICKS(50));
+							noTone(BUZZER);
+							vTaskDelay(pdMS_TO_TICKS(50));
+						}
+						vTaskDelay(pdMS_TO_TICKS(500));
+					}while(!botonPulsado);
 
 			#else
 

@@ -2,10 +2,70 @@
 
 ////////////////////////////////////////Placa que se va a flashear
 
+  // Cuál se está grabando. Cambiar esto para cada placa
+  #define nodoSeleccionado WisMesh_wisblock_Arduino_1
+
+
+
+  // Tipos de placas
   #define wisblock 0
   #define wistag 1
 
-  #define placaSiendoFlasheada wistag
+
+  #define WisMesh_wisblock_Arduino_1    0
+  #define Wistag_Casco_Minero           1
+  #define Wistag_Pecho                  2
+  #define Wistag_Abierta                3
+  #define Wistag_Normal_1               4
+  #define Wistag_Normal_2               5
+  #define Wistag_Normal_3               6
+  #define Wistag_Normal_4               7
+  #define Wistag_Normal_5               8
+  #define Wistag_Normal_6               9
+  #define Wistag_Normal_7               10
+
+  
+  // Para ver qué tipo de placa es
+  #define placaSiendoFlasheada \
+    ((nodoSeleccionado == WisMesh_wisblock_Arduino_1) ? wisblock : wistag)
+
+
+
+  struct DatosNodo {
+    const uint32_t nodeNum;
+    const char* longName;
+    const char* shortName;
+    const uint8_t tipo;
+
+    // Periodos de envio (ms)
+    const uint32_t periodoMensajePosition;        //ms
+    const uint32_t periodoMensajeTelemetria;      //ms
+    const uint32_t periodoMensajeNodeID;          //ms
+    const uint32_t periodoPeticionRouting;        //ms
+    const uint32_t tiempoEntreBinariosPrivados;   //ms
+  };
+
+
+  #define MIN *60*1000
+  #define SEG *1000
+  constexpr DatosNodo listaNodos[] = {
+    //                                nodeNum         longName                          shortName   tipo          perPositi    perTelem      perNodeID     perRouting    perBinario 
+    /*WisMesh_wisblock_Arduino_1*/   {0x01020304,     "WisMesh_wisblock_Arduino_1",     "0304",     wisblock,     30 MIN,      20 MIN,       20 MIN,       20 MIN,       1 MIN},
+    /*Wistag_Casco_Minero*/          {0x01020300,     "Wistag_Casco_Minero",            "0300",     wistag,       5 MIN,       20 MIN,       20 MIN,       10 MIN,       5 SEG},
+    /*Wistag_Pecho*/                 {0x01020301,     "Wistag_Pecho",                   "0301",     wistag,       5 MIN,       20 MIN,       20 MIN,       10 MIN,       5 SEG},
+    /*Wistag_Abierta*/               {0x010203FF,     "Wistag_Abierta",                 "03FF",     wistag,       5 MIN,       20 MIN,       20 MIN,       10 MIN,       5 SEG},
+    /*Wistag_Normal_1*/              {0x01020305,     "Wistag_Normal_1",                "0305",     wistag,       5 MIN,       20 MIN,       20 MIN,       5 MIN,        5 SEG},
+    /*Wistag_Normal_2*/              {0x01020306,     "Wistag_Normal_2",                "0306",     wistag,       5 MIN,       20 MIN,       20 MIN,       5 MIN,        5 SEG},
+    /*Wistag_Normal_3*/              {0x01020307,     "Wistag_Normal_3",                "0307",     wistag,       5 MIN,       20 MIN,       20 MIN,       5 MIN,        5 SEG},
+    /*Wistag_Normal_4*/              {0x01020308,     "Wistag_Normal_4",                "0308",     wistag,       5 MIN,       20 MIN,       20 MIN,       5 MIN,        5 SEG},
+    /*Wistag_Normal_5*/              {0x01020309,     "Wistag_Normal_5",                "0309",     wistag,       5 MIN,       20 MIN,       20 MIN,       5 MIN,        5 SEG},
+    /*Wistag_Normal_6*/              {0x0102030A,     "Wistag_Normal_6",                "030A",     wistag,       5 MIN,       20 MIN,       20 MIN,       5 MIN,        5 SEG},
+    /*Wistag_Normal_7*/              {0x0102030B,     "Wistag_Normal_7",                "030B",     wistag,       5 MIN,       20 MIN,       20 MIN,       5 MIN,        5 SEG},
+  };
+  #undef MIN
+  #undef SEG
+
+
 
   #if((placaSiendoFlasheada != wisblock) && (placaSiendoFlasheada != wistag))
     #error Placa siendo flasheada desconocida
@@ -40,7 +100,7 @@
 
 
 
-#define debugRedNeuronal false
+#define debugRedNeuronal true
 
 #define simularRedNeuronal false                                 //En simulación no se generarán caídas
       #define probabilidadCambioEstadoEsUnoEntreEsto 100
@@ -90,36 +150,15 @@
 
   constexpr uint32_t  gatewayNodeNum   = 0xb3690d07;
 
-////////////////////////////////////////
-
-
-
-
-
 ////////////////////////////////////////Identificacion del nodo en Meshtastic
 
-  #if (placaSiendoFlasheada == wisblock)
-    constexpr uint32_t  nodeNum   = 0x01020304;
-    char                longName[36] = "WisMesh_wisblock_Arduino_1";
-    char                shortName[8] = "0304";
-  #elif (placaSiendoFlasheada == wistag)
-    constexpr uint32_t  nodeNum   = 0x01020305;
-    char                longName[36] = "Wistag_Normal_1";
-    char                shortName[8] = "0305";
-    //0x01020300;               0x01020301;         0x010203FF;           0x01020305;
-    //"Wistag_Casco_Minero";    "Wistag_Pecho";     "Wistag_Abierta";     "Wistag_Normal_1";
-    //"0300";                   "0301";             "03FF";               "0305";
-  #endif
+  constexpr uint32_t nodeNum = listaNodos[nodoSeleccionado].nodeNum;
+  const char* const longName = listaNodos[nodoSeleccionado].longName;
+  const char* const shortName = listaNodos[nodoSeleccionado].shortName;
+
   constexpr uint8_t   hopLimit  = 7;
   constexpr bool      wantAck   = false;
   constexpr bool      viaMqtt   = false;
-
-////////////////////////////////////////
-
-
-
-
-
 
 ////////////////////////////////////////Configuración RadioLib
 
@@ -140,27 +179,16 @@
 
 ////////////////////////////////////////Configuración periodos de tareas
 
-  constexpr uint32_t tiempoMinimoEntreMensajesMeshtastic  = 40*1000;				// ms de periodicidad
-
-
-
+  constexpr uint32_t tiempoMinimoEntreMensajesMeshtastic  = 40*1000;				// ms de periodicidad entre actualizaciones del estado de la placa
   constexpr uint32_t periodoAccel = 1000 / 25;			// ms de periodicidad para conseguir 25 Hz
-
-
-
   constexpr uint32_t tiempoEntreMensajesPeriodicos = 500;   // ms
 
-
-  constexpr uint32_t tiempoEntreBinariosPrivados = 2*1000;   // ms                // 5 * 1000
-
-  // MEnsajes periódicos
-    constexpr uint32_t periodoMensajePosition     = 5*60*1000;		// ms de periodicidad
-
-    constexpr uint32_t periodoMensajeTelemetria   = 20*60*1000;				// ms de periodicidad
-
-    constexpr uint32_t periodoMensajeNodeID       = 20*60*1000;				// ms de periodicidad
-
-    constexpr uint32_t periodoPeticionRouting     = 2*1000;				// ms de periodicidad           // 10 * 60 * 1000
+  // Mensajes periódicos
+    constexpr uint32_t tiempoEntreBinariosPrivados  = listaNodos[nodoSeleccionado].tiempoEntreBinariosPrivados;
+    constexpr uint32_t periodoMensajePosition       = listaNodos[nodoSeleccionado].periodoMensajePosition;
+    constexpr uint32_t periodoMensajeTelemetria     = listaNodos[nodoSeleccionado].periodoMensajeTelemetria;
+    constexpr uint32_t periodoMensajeNodeID         = listaNodos[nodoSeleccionado].periodoMensajeNodeID;
+    constexpr uint32_t periodoPeticionRouting       = listaNodos[nodoSeleccionado].periodoPeticionRouting;
 
 ////////////////////////////////////////
 
